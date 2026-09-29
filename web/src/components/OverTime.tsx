@@ -8,8 +8,10 @@ import { fmt, pct } from "@/lib/format";
 const M = { top: 24, right: 72, bottom: 40, left: 56 };
 
 // Raw and competition-adjusted pools across your age, current age marked.
-export default function OverTime({ points, query }: { points: AgePoint[]; query: Query }) {
+export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[]; fixed: AgePoint[]; query: Query }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [slide, setSlide] = useState(true);
+  const points = slide ? sliding : fixed;
   const [w, setW] = useState(640);
   const [hover, setHover] = useState<number | null>(null);
 
@@ -47,9 +49,38 @@ export default function OverTime({ points, query }: { points: AgePoint[]; query:
             ? "It gets easier from here. Probably."
             : "Roughly holding steady."}
       </h2>
+      <div role="radiogroup" aria-label="Age range over time" className="mt-4 inline-flex rounded-full border border-rule p-1">
+        {(
+          [
+            [true, "Sliding with you"],
+            [false, `Fixed at ${query.seek.lo}–${query.seek.hi}`],
+          ] as const
+        ).map(([v, label]) => (
+          <button
+            key={String(v)}
+            role="radio"
+            aria-checked={slide === v}
+            onClick={() => setSlide(v)}
+            className={`rounded-full px-4 py-1.5 text-sm transition-colors ${slide === v ? "bg-ink text-paper" : "text-muted hover:text-ink"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <p className="mt-3 max-w-xl text-muted">
-        Your prospects from age {first.age} to {last.age}, with the ages you&apos;re looking for sliding along with
-        you (you&apos;re {query.me.age} seeking {query.seek.lo}–{query.seek.hi} now) and everything else held the same.
+        Your prospects from age {first.age} to {last.age},{" "}
+        {slide ? (
+          <>
+            with the ages you&apos;re looking for sliding along with you (you&apos;re {query.me.age} seeking{" "}
+            {query.seek.lo}–{query.seek.hi} now)
+          </>
+        ) : (
+          <>
+            still looking for {query.seek.lo}–{query.seek.hi} at every age, so only your own age (and how they see it)
+            changes
+          </>
+        )}{" "}
+        and everything else held the same.
         Five years from now your adjusted pool is {change(last) >= 0 ? "up" : "down"}{" "}
         <strong className="text-ink">{pct(Math.abs(change(last)))}</strong>; five years ago it was{" "}
         {change(first) >= 0 ? "up" : "down"} {pct(Math.abs(change(first)))}.
