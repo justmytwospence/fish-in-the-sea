@@ -1,18 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Choice } from "@/lib/competition";
 import { compute, noun, type Global, type Query, type Result, type Shard } from "@/lib/model";
 import { approx, shortCity } from "@/lib/format";
 import { serializeQuery } from "@/lib/query";
 import QueryForm from "./QueryForm";
-import Funnel from "./Funnel";
+import Sieve from "./Sieve";
+import Receipts from "./Receipts";
 import Verdict from "./Verdict";
 import Competition from "./Competition";
 import Leaderboard from "./Leaderboard";
 import Method from "./Method";
 
 const shardCache = new Map<string, Promise<Shard>>();
-let globalPromise: Promise<Global> | undefined;
+let staticPromise: Promise<[Global, Choice]> | undefined;
 
 function fetchShard(id: string) {
   let p = shardCache.get(id);
@@ -26,60 +28,109 @@ function fetchShard(id: string) {
   return p;
 }
 
+function LocateLine({ located, onMarket }: { located: string | null; onMarket: (id: string) => void }) {
+  const [state, setState] = useState<"idle" | "busy" | "failed" | "done">("idle");
+  const [place, setPlace] = useState<string | null>(null);
+  const locate = () => {
+    if (!navigator.geolocation) return setState("failed");
+    setState("busy");
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        // Round to about a kilometer before it leaves the browser.
+        const r = await fetch(`/api/locate?lat=${coords.latitude.toFixed(2)}&lon=${coords.longitude.toFixed(2)}`);
+        if (!r.ok) return setState("failed");
+        const hit = (await r.json()) as { market: string; place: string };
+        setPlace(hit.place);
+        onMarket(hit.market);
+        setState("done");
+      },
+      () => setState("failed"),
+      { maximumAge: 600_000, timeout: 10_000 },
+    );
+  };
+  return (
+    <p className="mt-3 text-xs text-muted">
+      {state === "done" && place ? (
+        <>Located you near {place}.</>
+      ) : located ? (
+        <>Guessed from your connection: {located}. </>
+      ) : null}
+      {state !== "done" && (
+        <button type="button" onClick={locate} className="underline hover:text-ink" disabled={state === "busy"}>
+          {state === "busy" ? "Locating…" : state === "failed" ? "Couldn't locate you; try again" : "Use my precise location"}
+        </button>
+      )}
+    </p>
+  );
+}
+
 export default function App({
   initialQuery,
   initialResult,
   dataYear,
+  located,
 }: {
   initialQuery: Query;
   initialResult: Result;
   dataYear: string;
+  located: string | null;
 }) {
   const [query, setQuery] = useState(initialQuery);
   const [result, setResult] = useState(initialResult);
-  const [global, setGlobal] = useState<Global | null>(null);
+  const [data, setData] = useState<[Global, Choice] | null>(null);
   const reqId = useRef(0);
   const qs = useMemo(() => serializeQuery(query), [query]);
 
   useEffect(() => {
-    (globalPromise ??= fetch("/data/global.json").then((r) => r.json())).then(setGlobal);
+    (staticPromise ??= Promise.all([
+      fetch("/data/global.json").then((r) => r.json()),
+      fetch("/data/choice.json").then((r) => r.json()),
+    ])).then(setData);
   }, []);
 
   useEffect(() => {
     window.history.replaceState(null, "", `?${qs}`);
-    if (!global) return;
+    if (!data) return;
     const id = ++reqId.current;
     fetchShard(query.market)
       .then((s) => {
-        if (id === reqId.current) setResult(compute(s, global, query));
+        if (id === reqId.current) setResult(compute(s, data[0], query, data[1]));
       })
       .catch(() => {});
-  }, [query, qs, global]);
+  }, [query, qs, data]);
 
   useEffect(() => {
     document.title = `${approx(result.final.value)} ${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${shortCity(result.market.name)} · The Denominator`;
   }, [result, query.seek]);
 
+  // Replay the sieve only when the funnel itself changes, not when you edit
+  // your own attributes in the competition section.
+  const sieveKey = useMemo(() => {
+    const { you: _you, ...rest } = query;
+    void _you;
+    return JSON.stringify(rest);
+  }, [query]);
+
   return (
     <main className="mx-auto max-w-3xl px-4 pb-24 pt-10 sm:px-6 sm:pt-16">
       <header className="mb-10">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-          The Denominator
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">The Denominator</p>
         <h1 className="mt-3 font-display text-4xl leading-[1.05] tracking-tight sm:text-5xl">
           How many people could you actually date?
         </h1>
         <p className="mt-4 max-w-xl text-muted">
-          Start with everyone in your metro. Apply the Census, then a few survey-based facts of
-          life. See who&apos;s left.
+          Pour everyone in your metro into the sieve. Shake out the Census, then a few survey-based facts of life. See
+          who&apos;s left.
         </p>
       </header>
 
       <QueryForm query={query} marketName={result.market.name} onChange={setQuery} />
-      <Funnel steps={result.steps} />
+      <LocateLine located={located} onMarket={(market) => setQuery((q) => ({ ...q, market }))} />
+      <Sieve key={sieveKey} steps={result.steps} />
+      <Receipts steps={result.steps} />
       <Verdict result={result} query={query} />
-      <Competition result={result} query={query} />
-      <Leaderboard qs={qs} query={query} onPick={(market) => setQuery({ ...query, market })} />
+      <Competition result={result} query={query} onYou={(you) => setQuery((q) => ({ ...q, you }))} />
+      <Leaderboard qs={qs} query={query} onPick={(market) => setQuery((q) => ({ ...q, market }))} />
       <Method dataYear={dataYear} />
     </main>
   );

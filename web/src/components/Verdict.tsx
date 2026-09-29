@@ -23,41 +23,6 @@ export function venue(n: number): string {
   return `You'd need ${Math.ceil(n / 70000)} NFL stadiums.`;
 }
 
-const UNITS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
-
-function DotGrid({ n }: { n: number }) {
-  const count = Math.round(n);
-  const unit = UNITS.find((u) => count / u <= 500) ?? 10000;
-  const dots = Math.max(0, Math.round(count / unit));
-  const cols = dots <= 100 ? Math.max(10, Math.ceil(Math.sqrt(dots * 2.5))) : 50;
-  const rows = Math.ceil(dots / cols);
-  const cell = 10;
-  return (
-    <figure className="mt-6">
-      <svg
-        viewBox={`0 0 ${cols * cell} ${Math.max(rows, 1) * cell}`}
-        className="w-full"
-        style={{ maxHeight: 360 }}
-        role="img"
-        aria-label={`${dots} dots, each one ${unit === 1 ? "person" : `${unit} people`}`}
-      >
-        {Array.from({ length: dots }, (_, i) => (
-          <circle
-            key={i}
-            cx={(i % cols) * cell + cell / 2}
-            cy={Math.floor(i / cols) * cell + cell / 2}
-            r={cell * 0.34}
-            className="fill-accent"
-          />
-        ))}
-      </svg>
-      <figcaption className="mt-2 text-xs text-muted">
-        {dots === 0 ? "Not even one dot." : unit === 1 ? "One dot per person." : `One dot per ${fmt(unit)} people.`}
-      </figcaption>
-    </figure>
-  );
-}
-
 export default function Verdict({ result, query }: { result: Result; query: Query }) {
   const n = result.final.value;
   const who = noun(query.seek.sex);
@@ -81,8 +46,6 @@ export default function Verdict({ result, query }: { result: Result; query: Quer
           Sampling range {fmt(lo)}–{fmt(hi)}. The survey-based steps are rougher than that.
         </p>
       )}
-
-      <DotGrid n={n} />
 
       <ul className="mt-8 grid gap-4 sm:grid-cols-2">
         <li className="rounded-lg border border-rule bg-card p-4">

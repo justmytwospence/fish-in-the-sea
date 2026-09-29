@@ -56,9 +56,11 @@ export default function Method({ dataYear }: { dataYear: string }) {
           </li>
         </ul>
         <p>
-          <strong>Competition</strong> counts available people of your sex at every age, weighted by the share of
-          recent couples (married or moved in together within five years) in which someone that age partnered with
-          someone in your target range.
+          <strong>Competition</strong> is a revealed-preference choice model fitted to couples formed in the last one to
+          three years (age, education, income and marriage history), plus published estimates for kids and height. It
+          weights every available competitor by how well they match what your targets go for, and your fair share is
+          how many of your targets would pick you if everyone chose in proportion to that appeal. Details are in the
+          competition section.
         </p>
         <p>
           <strong>Known gaps.</strong> Census records sex, not gender identity. Men&apos;s children are inferred from

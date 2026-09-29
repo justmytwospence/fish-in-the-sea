@@ -5,26 +5,32 @@ import type { RankResponse, RankRow, Sort } from "@/app/api/rank/route";
 import { noun, type Query } from "@/lib/model";
 import { fmt } from "@/lib/format";
 
-const TABS: { key: Sort; label: string; by: string; blurb: string }[] = [
-  { key: "value", label: "Most people", by: "pool size", blurb: "Biggest pool. Big metros win, obviously." },
-  { key: "density", label: "Densest", by: "density", blurb: "Pool per 100,000 residents: where a random encounter is likeliest." },
-  { key: "ratio", label: "Least competition", by: "least competition", blurb: "Fewest competitors per available person." },
+const MODES: { key: Sort; label: string; blurb: string; by: string }[] = [
+  {
+    key: "raw",
+    label: "Raw numbers",
+    by: "pool size",
+    blurb: "Most people who make it through your sieve. Big metros win, obviously.",
+  },
+  {
+    key: "fair",
+    label: "After competition",
+    by: "fair share",
+    blurb:
+      "Your fair share: how many of them would pick you, given everyone else in the running and what they go for. Size mostly cancels out, so this is about the balance of the market.",
+  },
 ];
 
-function metric(sort: Sort, r: RankRow) {
-  if (sort === "value") return fmt(r.value);
-  if (sort === "density") return `${fmt(r.density)} per 100k`;
-  return isFinite(r.ratio) ? `${Math.round(r.ratio * 100)} per 100` : "n/a";
-}
+const metric = (sort: Sort, r: RankRow) => (sort === "raw" ? fmt(r.value) : (r.fairShare ?? 0).toFixed(2));
 
 export default function Leaderboard({ qs, query, onPick }: { qs: string; query: Query; onPick: (id: string) => void }) {
   const [data, setData] = useState<RankResponse | null>(null);
-  const [sort, setSort] = useState<Sort>("density");
+  const [sort, setSort] = useState<Sort>("fair");
 
   useEffect(() => {
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      fetch(`/api/rank?${qs}`, { signal: ctrl.signal })
+      fetch(`/api/rank?v=2&${qs}`, { signal: ctrl.signal })
         .then((r) => r.json())
         .then(setData)
         .catch(() => {});
@@ -35,36 +41,40 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
     };
   }, [qs]);
 
-  const tab = TABS.find((t) => t.key === sort)!;
+  const mode = MODES.find((m) => m.key === sort)!;
   const rows = data?.top[sort] ?? [];
 
   return (
     <section aria-label="Other cities" className="mt-16 border-t border-rule pt-10">
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Elsewhere</p>
       <h2 className="mt-3 font-display text-3xl tracking-tight">Should you move?</h2>
-      {data?.you && (
-        <p className="mt-3 text-muted">
-          For this exact search, your area ranks{" "}
-          <strong className="text-ink">#{data.you.rank[sort]}</strong> of {data.total} metros for {tab.by}.
-        </p>
-      )}
 
-      <div role="tablist" className="mt-6 flex flex-wrap gap-2">
-        {TABS.map((t) => (
+      <div role="radiogroup" aria-label="Ranking" className="mt-6 inline-flex rounded-full border border-rule p-1">
+        {MODES.map((m) => (
           <button
-            key={t.key}
-            role="tab"
-            aria-selected={t.key === sort}
-            onClick={() => setSort(t.key)}
-            className={`rounded-full border px-3 py-1 text-sm ${
-              t.key === sort ? "border-ink bg-ink text-paper" : "border-rule hover:border-muted"
+            key={m.key}
+            role="radio"
+            aria-checked={m.key === sort}
+            onClick={() => setSort(m.key)}
+            className={`rounded-full px-4 py-1.5 text-sm transition-colors ${
+              m.key === sort ? "bg-ink text-paper" : "text-muted hover:text-ink"
             }`}
           >
-            {t.label}
+            {m.label}
           </button>
         ))}
       </div>
-      <p className="mt-2 text-sm text-muted">{tab.blurb}</p>
+      <p className="mt-3 max-w-xl text-sm text-muted">{mode.blurb}</p>
+      {data?.you && (
+        <p className="mt-3">
+          Your metro ranks <strong>#{data.you.rank[sort]}</strong> of {data.total} by {mode.by}
+          {sort === "fair" ? (
+            <> ({(data.you.fairShare ?? 0).toFixed(2)}; by raw numbers it&apos;s #{data.you.rank.raw}).</>
+          ) : (
+            <> ({fmt(data.you.value)}; after competition it&apos;s #{data.you.rank.fair}).</>
+          )}
+        </p>
+      )}
 
       <ol className={`mt-4 divide-y divide-rule transition-opacity ${data ? "" : "opacity-40"}`}>
         {(rows.length ? rows : Array.from({ length: 10 }, () => null)).map((r, i) => (
@@ -86,13 +96,16 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
                 <span className="h-4 w-48 rounded bg-rule/50" />
               )}
             </span>
-            <span className="shrink-0 tabular-nums">{r ? metric(sort, r) : ""}</span>
+            <span className="shrink-0 text-right tabular-nums">
+              {r ? metric(sort, r) : ""}
+              {r && sort === "fair" && <span className="ml-2 text-xs text-muted">{fmt(r.value)} in pool</span>}
+            </span>
           </li>
         ))}
       </ol>
       <p className="mt-3 text-xs text-muted">
-        Metro areas only, same search ({noun(query.seek.sex)} {query.seek.lo}–{query.seek.hi}, same filters and
-        assumptions). &ldquo;Least competition&rdquo; skips metros with fewer than 100 available people.
+        Metro areas only, same search ({noun(query.seek.sex)} {query.seek.lo}–{query.seek.hi}, same filters, same you).
+        Fair share skips metros with fewer than 50 people in your pool.
       </p>
     </section>
   );
