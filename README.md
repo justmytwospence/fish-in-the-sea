@@ -17,6 +17,7 @@ How many people could you actually date? Pick a US town, your age and sex, and w
 - CDC BRFSS 2024 metro (SMART) and state prevalence for smoking and obesity, via data.cdc.gov (datasets j32a-sa6u and dttw-5yxu).
 - General Social Survey 1972-2024 cumulative file (gss7224_r3a.dta from gss.norc.org): religion of unmarried adults by sex and age, and religious pairing of married couples.
 - Pew Research Center Religious Landscape Study 2023-24: religious composition for every state and 34 metros, scraped from the public state and metro pages into `pipeline/raw/pew_rls_2023_24.csv`.
+- CDC National Survey of Family Growth 2022-2023 respondent files (NSFG_2022_2023_{Fem,Male}RespPUFData.csv from ftp.cdc.gov/pub/Health_Statistics/NCHS/NSFG): whether unpartnered adults want kids someday.
 - 2024 presidential results by county (github.com/tonmcg/US_County_Level_Election_Results_08-24).
 - Survey and literature assumptions (Gallup, NSFG, GSS, HCMST, Pew, Di Nallo on kids, Hitsch et al. on height) live in `web/src/lib/assumptions.ts` with citations.
 
@@ -51,13 +52,14 @@ npx mapshaper -i shp/cb_2024_us_cbsa_20m.shp shp/rural.shp combine-files -filter
 npx mapshaper -i shp/cb_2024_us_state_20m.shp name=states -filter 'STATEFP != "72"' -filter-fields STUSPS -proj albersusa -simplify 12% -o states.json format=topojson quantization=10000
 npx mapshaper -i cbsa.json states.json combine-files -o ../../web/public/data/map.json format=topojson bbox
 
-cd .. && uv run python choice.py && uv run python context.py && uv run python religion.py && uv run python politics.py
+cd .. && uv run python choice.py && uv run python context.py && uv run python religion.py && uv run python politics.py && uv run python kids.py
 ```
 
 - `build.py` writes per-market counts (ACS scaled to the 2025 estimates), attribute mixes, preset tags and the place search index.
 - `choice.py` fits the revealed-preference model behind the competition section (a conditional logit on recently formed couples versus sampled single alternatives, about a minute).
 - `politics.py` writes national party identification rates (GSS), political pairing (HCMST 2017, `raw/hcmst2017.dta` from data.stanford.edu/hcmst2017) and per-metro shifts from the 2024 vote.
 - `religion.py` writes national religion rates, religious pairing and per-metro local shifts.
+- `kids.py` writes rates of wanting kids someday by sex, age, education and parity (NSFG).
 - `context.py` writes heights, health rates and per-metro context (health shifts, 2024 vote) and pulls BRFSS from data.cdc.gov.
 
 The site is a static snapshot of the data above. To refresh it for a later ACS release, change `YEAR` in `pipeline/build.py`, update the URLs above, rebuild and redeploy.

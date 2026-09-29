@@ -143,6 +143,10 @@ export const SOURCES = {
     label: "Census Vintage 2025 population estimates by metro and county, sex and age",
     url: "https://www2.census.gov/programs-surveys/popest/datasets/2020-2025/",
   },
+  nsfgWant: {
+    label: "CDC National Survey of Family Growth 2022-2023",
+    url: "https://www.cdc.gov/nchs/nsfg/nsfg-2022-2023-puf.htm",
+  },
   ersTypology: {
     label: "USDA ERS County Typology Codes, 2025 edition",
     url: "https://www.ers.usda.gov/data-products/county-typology-codes",

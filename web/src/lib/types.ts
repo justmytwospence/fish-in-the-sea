@@ -29,6 +29,10 @@ export const NPOL = 3;
 export const PARTIES = ["Democratic", "Independent/other", "Republican"];
 export const PARTY_PLURAL = ["Democrats", "Independents & others", "Republicans"];
 
+// Want (more) kids someday: 0 yes, 1 unsure, 2 no (NSFG RWANT).
+export const WANT_KIDS = ["Wants kids", "Unsure", "Doesn't want kids"];
+export const NWANT = 3;
+
 // Religion: 0 Protestant (incl. nondenominational Christian), 1 Catholic,
 // 2 Latter-day Saint, 3 Jewish, 4 other religion, 5 none.
 export const NREL = 6;

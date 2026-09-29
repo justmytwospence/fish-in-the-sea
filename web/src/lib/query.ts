@@ -18,6 +18,7 @@ export const DEFAULT_QUERY: Query = {
     races: [],
     religions: [],
     politics: [],
+    wantKids: [],
   },
   model: { separated: false, orientation: true, relationship: true, looking: false, spark: 0 },
   you: {},
@@ -59,6 +60,7 @@ export function parseQuery(p: Params): Query {
     races: [0, 1, 2, 3, 4].filter((r) => f.has(`race${r}`)),
     religions: [0, 1, 2, 3, 4, 5].filter((r) => f.has(`rel${r}`)),
     politics: [0, 1, 2].filter((r) => f.has(`pol${r}`)),
+    wantKids: [0, 1, 2].filter((r) => f.has(`kw${r}`)),
   };
   const m = new Set((get(p, "m") ?? "").split(",").filter(Boolean));
   q.model = {
@@ -105,6 +107,7 @@ export function serializeQuery(q: Query): string {
     ...[...q.filters.races].sort().map((r) => `race${r}`),
     ...[...q.filters.religions].sort().map((r) => `rel${r}`),
     ...[...q.filters.politics].sort().map((r) => `pol${r}`),
+    ...[...q.filters.wantKids].sort().map((r) => `kw${r}`),
   ].filter(Boolean);
   if (f.length) p.set("f", f.join(","));
   const m = [

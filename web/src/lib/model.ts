@@ -8,7 +8,7 @@ import {
   type Source,
 } from "./assumptions";
 import { compete, type Choice, type Competition, type You } from "./competition";
-import { NPOL, NRACE, NREL, NTYPE, PARTY_PLURAL, RACES, RELIGIONS, typeIndex, type Typed } from "./types";
+import { NPOL, NRACE, NREL, NTYPE, NWANT, PARTY_PLURAL, RACES, RELIGIONS, WANT_KIDS, typeIndex, type Typed } from "./types";
 
 export type Marg = "nm" | "sep" | "wid" | "div" | "mar";
 type UMarg = Exclude<Marg, "mar">;
@@ -61,6 +61,7 @@ export interface Global {
   ctx?: Record<string, MarketCtx>;
   religion?: ReligionData;
   politics?: PoliticsData;
+  kids?: KidsData;
 }
 
 export interface Query {
@@ -79,6 +80,7 @@ export interface Query {
     races: number[]; // race/ethnicity codes to include; empty = any
     religions: number[]; // religion codes to include; empty = any
     politics: number[]; // party codes to include; empty = any
+    wantKids: number[]; // WANT_KIDS groups to include; empty = any
     nonSmoker: boolean;
     bmiMax: 0 | 25 | 30; // 0 = no BMI filter
   };
@@ -117,6 +119,7 @@ export interface Composition {
   race: number[]; // by race/ethnicity code
   religion: number[]; // by religion code
   politics: number[]; // by party code
+  wantKids: number[]; // by WANT_KIDS group
   smoke: number | null; // estimated share, when health data is available
   obese: number | null;
   over: number | null;
@@ -157,8 +160,14 @@ export interface PoliticsData {
   markets: Record<string, number>; // log-odds shift of the 2024 two-party D share
 }
 
-export function mergeContext(g: Global, c: Context, r?: ReligionData, pol?: PoliticsData): Global {
-  return { ...g, health: c.health, ctx: c.markets, religion: r, politics: pol };
+// Shape of kids.json (see pipeline/kids.py).
+export interface KidsData {
+  bands: [number, number][];
+  rates: Record<"1" | "2", number[][][][]>; // [band][has kids][edu][WANT_KIDS]
+}
+
+export function mergeContext(g: Global, c: Context, r?: ReligionData, pol?: PoliticsData, kids?: KidsData): Global {
+  return { ...g, health: c.health, ctx: c.markets, religion: r, politics: pol, kids };
 }
 
 export const NCELL = 97;
@@ -310,6 +319,16 @@ function pool(
     const m = polMix(a);
     return m ? polPicked.reduce((t, r) => t + m[r], 0) : 1;
   };
+  // Wanting kids someday: national NSFG rates by sex, age, education and
+  // whether they have kids, so it follows each cell's education and kids.
+  // The NSFG stops at 49; older ages use the 45-49 rates.
+  const K = g.kids;
+  const wantPicked = withFilters && f.wantKids.length && K ? f.wantKids : null;
+  const wantMix = (a: number, edu: number, kids: number) => {
+    if (!K) return null;
+    const i = K.bands.findIndex(([lo, hi]) => a >= lo && a <= hi);
+    return K.rates[sx][i < 0 ? (a < K.bands[0][0] ? 0 : K.bands.length - 1) : i][kids][edu];
+  };
   const fBmi = (a: number) =>
     withFilters && f.bmiMax ? 1 - (rate(f.bmiMax === 30 ? "obese" : "over", a) ?? 0) : 1;
   const comp: Composition = {
@@ -323,6 +342,7 @@ function pool(
     race: new Array(NRACE).fill(0),
     religion: new Array(NREL).fill(0),
     politics: new Array(NPOL).fill(0),
+    wantKids: new Array(NWANT).fill(0),
     smoke: g.health ? 0 : null,
     obese: g.health ? 0 : null,
     over: g.health ? 0 : null,
@@ -343,6 +363,7 @@ function pool(
     bmi: acc(),
     religion: acc(),
     politics: acc(),
+    wantKids: acc(),
     orientation: acc(),
     relationship: acc(),
     looking: acc(),
@@ -398,10 +419,25 @@ function pool(
       const avg = (f: (a: number) => number) => ages.reduce((t, a, i) => t + sh[i] * f(a), 0) / S;
       const fh = (a: number) => (hf ? heightShare(sex, a, q.you.height!, hf) : 1);
       const fs = (a: number) => fh(a) * fSmoke(a);
-      const fb = (a: number) => fs(a) * fBmi(a);
-      const fg = (a: number) => fb(a) * fRel(a);
+      const fg = (a: number) => fs(a) * fRel(a);
       const fp = (a: number) => fg(a) * fPol(a);
-      const fo = (a: number) => fp(a) * (q.model.orientation ? attraction(sex, towards, a) : 1);
+      // Share of this group's remaining cells wanting what you picked.
+      const wantKept = (a: number) => {
+        if (!wantPicked) return 1;
+        let num = 0;
+        let den = 0;
+        for (let c = 0; c < NCELL; c++) {
+          if (!masks.income[c] || p[c] <= 0) continue;
+          const { edu, kids } = cellOf(c);
+          const m = wantMix(a, edu, kids);
+          den += p[c];
+          num += p[c] * (m ? wantPicked.reduce((t, r) => t + m[r], 0) : 1);
+        }
+        return den > 0 ? num / den : 1;
+      };
+      const fk = (a: number) => fp(a) * wantKept(a);
+      const fb = (a: number) => fk(a) * fBmi(a);
+      const fo = (a: number) => fb(a) * (q.model.orientation ? attraction(sex, towards, a) : 1);
       const fr = (a: number) => fo(a) * (q.model.relationship ? 1 - inRelationship(sex, a) : 1);
       const fl = (a: number) => fr(a) * (q.model.looking ? looking(sex, a) : 1);
       const spark = q.model.spark > 0 ? q.model.spark : 1;
@@ -410,6 +446,7 @@ function pool(
       add(out.bmi, C, varC, pFinal, n, avg(fb));
       add(out.religion, C, varC, pFinal, n, avg(fg));
       add(out.politics, C, varC, pFinal, n, avg(fp));
+      add(out.wantKids, C, varC, pFinal, n, avg(fk));
       add(out.orientation, C, varC, pFinal, n, avg(fo));
       add(out.relationship, C, varC, pFinal, n, avg(fr));
       add(out.looking, C, varC, pFinal, n, avg(fl));
@@ -454,6 +491,12 @@ function pool(
           if (!masks.income[c] || p[c] <= 0) continue;
           const { edu, kids, inc, par } = cellOf(c);
           const v = w * p[c];
+          const wm = wantMix(a, edu, kids);
+          if (wm) {
+            const wk = wm.map((x, r) => (!wantPicked || wantPicked.includes(r) ? x : 0));
+            const wkSum = wk.reduce((x, y) => x + y, 0) || 1;
+            for (let r = 0; r < NWANT; r++) comp.wantKids[r] += (v * wk[r]) / wkSum;
+          }
           out.typed.m[row + typeIndex(edu, inc, kids, prev)] += v;
           comp.ages[a - lo] += v;
           comp.edu[edu] += v;
@@ -556,6 +599,13 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
     push("politics", label, gone, t.politics, "survey", [SOURCES.gss, SOURCES.election],
       "Party identification of unmarried adults by sex and age (General Social Survey 2016-2024, leaners counted with their party), with Democratic vs. Republican odds shifted by how this metro voted in 2024 relative to the country. Applied as independent of every other filter.");
   }
+  if (q.filters.wantKids.length && g.kids) {
+    const out = WANT_KIDS.map((_, r) => r).filter((r) => !q.filters.wantKids.includes(r));
+    const label = out.length === 1 ? `Not "${WANT_KIDS[out[0]].toLowerCase()}"` : q.filters.wantKids.map((r) => WANT_KIDS[r]).join(" or ");
+    push("wantKids", out.length === 1 && out[0] === 2 ? "Open to kids" : out.length === 1 && out[0] === 0 ? "Not set on kids" : label,
+      out.map((r) => WANT_KIDS[r].toLowerCase()).join(" and "), t.wantKids, "survey", [SOURCES.nsfgWant],
+      "Whether unpartnered adults want a(nother) baby someday (\"Do you, yourself, want to have a(nother) baby at some time in the future?\"), by sex, age, education and whether they already have kids, from the National Survey of Family Growth 2022-2023. Follows the education and kids mix of who's left. The survey stops at 49, so older ages use the 45-49 rates. Intentions change, in both directions.");
+  }
   if (q.filters.bmiMax && g.health)
     push("bmi", q.filters.bmiMax === 25 ? "BMI under 25" : "BMI under 30", q.filters.bmiMax === 25 ? "BMI 25 or higher" : "BMI 30 or higher",
       t.bmi, "survey", [SOURCES.nhanes, SOURCES.brfss],
@@ -591,6 +641,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
       f.races.length > 0 ||
       f.religions.length > 0 ||
       f.politics.length > 0 ||
+      f.wantKids.length > 0 ||
       heightFilter(q) !== null;
     const base = filtered ? pool(s, g, q, T, M, lo, hi, false) : t;
     const relPairing = g.religion?.pairing[`${T}${M}`];

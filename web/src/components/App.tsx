@@ -119,7 +119,8 @@ export default function App({
         fetch("/data/context.json").then((r) => r.json()),
         fetch("/data/religion.json").then((r) => r.json()),
         fetch("/data/politics.json").then((r) => r.json()),
-      ]).then(([g, c, r, p]) => mergeContext(g, c, r, p)),
+        fetch("/data/kids.json").then((r) => r.json()),
+      ]).then(([g, c, r, p, k]) => mergeContext(g, c, r, p, k)),
       fetch("/data/choice.json").then((r) => r.json()),
     ])).then(setData);
   }, []);

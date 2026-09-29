@@ -3,6 +3,13 @@
 import type { Sex } from "@/lib/assumptions";
 import { heightDefault, type Query } from "@/lib/model";
 import { NPOL, PARTY_PLURAL, RACES, RELIGIONS } from "@/lib/types";
+
+// Kids someday: rule out the ones set on kids or the ones set against them;
+// the unsure are always kept.
+const WANT_RULE_OUT: [number, string][] = [
+  [0, "Want kids"],
+  [2, "Don't want kids"],
+];
 import CityPicker from "./CityPicker";
 
 const ages = Array.from({ length: 73 }, (_, i) => i + 18);
@@ -178,6 +185,30 @@ export default function QueryForm({
             {label}
           </Chip>
         ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-sm text-muted">Kids someday, rule out:</span>
+        <Chip on={f.wantKids.length === 0} onClick={() => set({ filters: { ...f, wantKids: [] } })}>
+          nobody
+        </Chip>
+        {WANT_RULE_OUT.map(([r, label]) => {
+          const excluded = f.wantKids.length ? [0, 1, 2].filter((x) => !f.wantKids.includes(x)) : [];
+          const on = excluded.includes(r);
+          const next = on ? excluded.filter((x) => x !== r) : [...excluded, r];
+          return (
+            <Chip
+              key={label}
+              on={on}
+              disabled={next.length > 1}
+              onClick={() =>
+                set({ filters: { ...f, wantKids: next.length ? [0, 1, 2].filter((x) => !next.includes(x)) : [] } })
+              }
+            >
+              {label}
+            </Chip>
+          );
+        })}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">

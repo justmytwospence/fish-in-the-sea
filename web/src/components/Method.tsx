@@ -89,6 +89,14 @@ export default function Method({ dataYear }: { dataYear: string }) {
           of the other filters.
         </p>
         <p>
+          <strong>Kids someday.</strong> Unpartnered adults answering &ldquo;Do you, yourself, want to have a(nother)
+          baby at some time in the future?&rdquo; in the <Src s={SOURCES.nsfgWant} />: yes, no or don&apos;t know, by
+          sex, age, education and whether they already have kids. Because it varies with education and kids, it
+          follows the mix of who&apos;s left after the Census filters instead of assuming independence. The survey
+          covers ages 18–49 here; older ages reuse the 45–49 rates, which likely overstates how many older women
+          want kids. The unsure (about 4%) are never ruled out. It&apos;s national, and intentions change.
+        </p>
+        <p>
           <strong>Height and health.</strong> Height filters use measured heights by sex and age from{" "}
           <Src s={SOURCES.nhanes} />. Smoking and BMI start from NHANES rates for unpartnered adults by sex and age
           (BMI is measured, not self-reported), then shift up or down by how the metro, or its state where the CDC
