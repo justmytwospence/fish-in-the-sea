@@ -132,8 +132,20 @@ export const SOURCES = {
     url: "https://doi.org/10.1371/journal.pone.0054186",
   },
   nhanes: {
-    label: "CDC NHANES 2015-2018 anthropometric reference data",
-    url: "https://www.cdc.gov/nchs/data/series/sr_03/sr03-046-508.pdf",
+    label: "CDC NHANES 2017-2023 (measured height and BMI, smoking)",
+    url: "https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/default.aspx?Cycle=2021-2023",
+  },
+  brfss: {
+    label: "CDC BRFSS 2024 metro (SMART) and state prevalence",
+    url: "https://data.cdc.gov/Behavioral-Risk-Factors/Behavioral-Risk-Factors-Selected-Metropolitan-Area/j32a-sa6u",
+  },
+  pep: {
+    label: "Census Vintage 2025 population estimates by metro, sex and age",
+    url: "https://www2.census.gov/programs-surveys/popest/datasets/2020-2025/metro/asrh/",
+  },
+  election: {
+    label: "2024 presidential results by county (compiled from official returns)",
+    url: "https://github.com/tonmcg/US_County_Level_Election_Results_08-24",
   },
   pewProvider: {
     label: "Pew (2017), Americans see men as the financial providers",
@@ -150,11 +162,11 @@ export const SOURCES = {
 } satisfies Record<string, Source>;
 
 // ---------------------------------------------------------------- height
-// NHANES 2015-2018 (Fryar et al. 2021, Tables 10 and 12): means by age, SD
-// derived from the 5th-95th percentile spread.
+// Measured height, NHANES Aug 2021-Aug 2023 (BMX_L), weighted means and SDs
+// by sex and age band (pipeline/context.py).
 export function heightDist(sex: Sex, age: number): { mean: number; sd: number } {
-  if (sex === 1) return age < 40 ? { mean: 69.3, sd: 2.9 } : age < 60 ? { mean: 69.2, sd: 3.0 } : { mean: 68.3, sd: 2.8 };
-  return age < 40 ? { mean: 64.0, sd: 2.7 } : age < 60 ? { mean: 63.7, sd: 2.7 } : { mean: 62.7, sd: 2.6 };
+  if (sex === 1) return age < 40 ? { mean: 69.36, sd: 2.95 } : age < 60 ? { mean: 69.03, sd: 3.02 } : { mean: 68.27, sd: 2.97 };
+  return age < 40 ? { mean: 64.17, sd: 2.73 } : age < 60 ? { mean: 63.57, sd: 2.72 } : { mean: 62.67, sd: 2.68 };
 }
 
 function normCdf(z: number): number {

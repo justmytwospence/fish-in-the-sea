@@ -9,6 +9,8 @@ export type Sort = "raw" | "adjusted" | "odds";
 export interface RankRow {
   id: string;
   name: string;
+  cbsa: string;
+  pop: number;
   value: number; // your pool
   adjusted: number; // your pool, adjusted for competition
   multiplier: number; // adjusted / value
@@ -20,8 +22,8 @@ export interface RankResponse {
   top: Record<Sort, RankRow[]>;
   // Your metro and the NEIGHBORS on either side of it, with ranks.
   around: Record<Sort, { rank: number; row: RankRow }[]>;
-  // Every metro, for the chart: [id, name, pool, adjusted, multiplier]
-  all: [string, string, number, number, number][];
+  // Every metro, for the chart and map: [id, name, pool, adjusted, multiplier, cbsa, population]
+  all: [string, string, number, number, number, string, number][];
 }
 
 const NEIGHBORS = 5;
@@ -49,6 +51,8 @@ export async function GET(req: Request) {
       rows.push({
         id: m.id,
         name: m.name,
+        cbsa: m.cbsa ?? "",
+        pop: m.pop,
         value: r.final.value,
         adjusted: r.final.value * mult,
         multiplier: r.final.value >= MIN_POOL ? mult : 0,
@@ -86,6 +90,8 @@ export async function GET(req: Request) {
       Math.round(r.value * 10) / 10,
       Math.round(r.adjusted * 10) / 10,
       Math.round(r.multiplier * 1000) / 1000,
+      r.cbsa,
+      r.pop,
     ]),
   };
   return Response.json(body, {

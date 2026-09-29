@@ -22,23 +22,27 @@ export default function Method({ dataYear }: { dataYear: string }) {
         </p>
         <p>
           <strong>Counts.</strong> Population, sex, age and marital status come straight from the{" "}
-          <Src s={SOURCES.acs} />, the most recent release that covers every metro ({dataYear}; the 2025 1-year
-          release has been delayed). ACS reports ages in five-year bins; custom ranges are split using
-          single-year-of-age shares from the microdata. &ldquo;Not married&rdquo; means never married, divorced or
-          widowed.
+          <Src s={SOURCES.acs} />, the most recent release that covers every metro (the 2025 release has been
+          delayed indefinitely). Those counts are centered around 2022, so each sex and age group is scaled to the{" "}
+          <Src s={SOURCES.pep} /> while keeping the ACS marital-status mix. ACS reports ages in five-year bins;
+          custom ranges are split using single-year-of-age shares from the microdata. &ldquo;Not married&rdquo; means
+          never married, divorced or widowed. ({dataYear}.)
         </p>
         <p>
-          <strong>Cohabitation, education, kids.</strong> Census tables don&apos;t cross marital status with these,
-          so they come from the <Src s={SOURCES.pums} />: for each sex, age bin and marital status we measure the
-          share living with a partner (or in an institution), the education mix and whether own children under
-          18 live in the home, for the microdata areas that overlap each metro. Small metros borrow strength from
+          <strong>Cohabitation, education, kids, living situation, income.</strong> Census tables don&apos;t cross
+          marital status with these, so they come from the <Src s={SOURCES.pums} />: for each sex, age bin and
+          marital status we measure the share living with a partner (or in an institution), and the joint mix of
+          education, own children under 18 at home, living in a parent&apos;s home and personal income, for the
+          microdata areas that overlap each metro. Small metros borrow strength from
           their Census division. Measuring these jointly, instead of multiplying separate percentages, keeps real
           correlations: unmarried 35-year-olds are more likely to have a degree and less likely to have kids than
           35-year-olds overall.
         </p>
         <p>
           <strong>The survey steps</strong> are national, by age and sex, and applied as multipliers, so treat
-          them as educated guesses (they&apos;re marked <em>est.</em> and can be switched off).
+          them as educated guesses (they&apos;re marked <em>est.</em> and can be switched off). When you stack
+          several Census filters in a small metro, fewer than about 30 survey records may stand behind the result;
+          those steps get a <em>thin data</em> tag.
         </p>
         <ul className="list-disc space-y-1 pl-5">
           <li>
@@ -60,12 +64,23 @@ export default function Method({ dataYear }: { dataYear: string }) {
           </li>
         </ul>
         <p>
+          <strong>Height and health.</strong> Height filters use measured heights by sex and age from{" "}
+          <Src s={SOURCES.nhanes} />. Smoking and BMI start from NHANES rates for unpartnered adults by sex and age
+          (BMI is measured, not self-reported), then shift up or down by how the metro, or its state where the CDC
+          doesn&apos;t survey the metro, compares with the US in the <Src s={SOURCES.brfss} />. They&apos;re treated as
+          independent of the Census filters, which overstates the pool slightly when you combine them (smoking falls
+          with education, for example). The 2024 vote in the context card sums county results from{" "}
+          <Src s={SOURCES.election} />.
+        </p>
+        <p>
           <strong>Competition</strong> is a revealed-preference choice model fitted to couples formed in the last one to
           three years (age, education, income and marriage history), plus published estimates for kids and height. It
           scores every available competitor by how well they match what your targets go for. Your competition-adjusted
           pool is your pool divided by the number of serious competitors per person in it (counting competitors by
           appeal, so long shots count for little), times your appeal relative to a typical serious competitor. With
-          one serious competitor per person and you exactly typical, it equals the raw pool. Details are in the
+          one serious competitor per person and you exactly typical, it equals the raw pool. Your filters are your
+          preferences, not your competitors&apos;, so how crowded the market is gets measured on the pool before
+          your filters, while how you stack up uses what your filtered pool goes for. Details are in the
           competition section.
         </p>
         <p>

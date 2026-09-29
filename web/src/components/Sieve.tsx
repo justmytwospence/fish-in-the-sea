@@ -8,7 +8,7 @@ import { plan, SieveEngine } from "./sieve-engine";
 const DWELL_MS = 900;
 
 // Remount (via `key`) whenever the funnel changes; that rewinds everything.
-export default function Sieve({ steps }: { steps: Step[] }) {
+export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: boolean }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engine = useRef<SieveEngine | null>(null);
@@ -165,6 +165,14 @@ export default function Sieve({ steps }: { steps: Step[] }) {
           <div aria-live="polite">
             <p className="text-sm text-muted">
               Step {cur + 1} of {steps.length}
+              {thin && s.kind === "microdata" && (
+                <span
+                  title="Few survey records behind this step here, so the estimate leans on regional rates. Treat it as rough."
+                  className="ml-2 rounded border border-accent px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-accent"
+                >
+                  thin data
+                </span>
+              )}
               {modeled && (
                 <span className="ml-2 rounded bg-accent-soft px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-accent">
                   est.

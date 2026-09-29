@@ -2,7 +2,7 @@ import "server-only";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Choice } from "./competition";
-import type { Global, Shard } from "./model";
+import { mergeContext, type Context, type Global, type Shard } from "./model";
 
 const DIR = path.join(process.cwd(), "public", "data");
 
@@ -13,7 +13,7 @@ const shards = new Map<string, Promise<Shard>>();
 
 export interface MarketIndex {
   year: string;
-  markets: { id: string; name: string; kind: string; pop: number }[];
+  markets: { id: string; name: string; kind: string; pop: number; cbsa?: string }[];
   places: [name: string, state: string, market: string, pop: number, lat: number | null, lon: number | null][];
 }
 
@@ -21,8 +21,11 @@ async function json<T>(file: string): Promise<T> {
   return JSON.parse(await readFile(path.join(DIR, file), "utf8")) as T;
 }
 
+// Census tables plus context.json (health rates, per-metro context).
 export function loadGlobal() {
-  return (globalP ??= json<Global>("global.json"));
+  return (globalP ??= Promise.all([json<Global>("global.json"), json<Context>("context.json")]).then(([g, c]) =>
+    mergeContext(g, c),
+  ));
 }
 
 export function loadChoice() {

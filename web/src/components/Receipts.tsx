@@ -12,13 +12,19 @@ const KIND: Record<StepKind, { tag: string; title: string }> = {
 };
 
 // The receipts: every step of the sieve as a table, with sources and margins.
-export default function Receipts({ steps }: { steps: Step[] }) {
+export default function Receipts({ steps, thin = false, records = 0 }: { steps: Step[]; thin?: boolean; records?: number }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <details className="mt-4">
       <summary className="cursor-pointer select-none text-sm text-muted hover:text-ink">
         Show the receipts: every step, its source and margin of error
       </summary>
+      {thin && (
+        <p className="mt-3 rounded-md border border-accent/40 bg-accent-soft/40 p-3 text-sm">
+          Only about {Math.max(1, Math.round(records))} survey records in this metro match every Census filter you&apos;ve
+          stacked, so the microdata steps lean on regional rates. The direction is right; the exact number is rough.
+        </p>
+      )}
       <table className="mt-3 w-full text-sm">
         <thead>
           <tr className="border-b border-rule text-left text-xs uppercase tracking-wide text-muted">
@@ -49,6 +55,14 @@ export default function Receipts({ steps }: { steps: Step[] }) {
                     >
                       {KIND[s.kind].tag}
                     </span>
+                    {thin && s.kind === "microdata" && (
+                      <span
+                        title="Few survey records behind this step here, so the estimate leans on regional rates. Treat it as rough."
+                        className="ml-1 rounded border border-accent px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-accent"
+                      >
+                        thin data
+                      </span>
+                    )}
                   </td>
                   <td className="py-2 text-right tabular-nums text-muted">
                     {factor === null ? "" : `${Math.round(Math.min(1, factor) * 100)}%`}

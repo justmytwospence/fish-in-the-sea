@@ -106,6 +106,40 @@ export default function QueryForm({
         <Chip on={f.noKids} onClick={() => set({ filters: { ...f, noKids: !f.noKids } })}>
           no kids at home
         </Chip>
+        <Chip on={f.notWithParents} onClick={() => set({ filters: { ...f, notWithParents: !f.notWithParents } })}>
+          not living with parents
+        </Chip>
+        <Chip on={f.nonSmoker} onClick={() => set({ filters: { ...f, nonSmoker: !f.nonSmoker } })}>
+          non-smoker
+        </Chip>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-sm text-muted">Earning at least:</span>
+        {(["any", "$25k", "$60k", "$120k"] as const).map((label, i) => (
+          <Chip
+            key={label}
+            on={f.incomeMin === i}
+            onClick={() => set({ filters: { ...f, incomeMin: (f.incomeMin === i ? 0 : i) as 0 | 1 | 2 | 3 } })}
+          >
+            {label}
+          </Chip>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-sm text-muted">BMI:</span>
+        {(
+          [
+            [0, "any"],
+            [30, "under 30"],
+            [25, "under 25"],
+          ] as const
+        ).map(([v, label]) => (
+          <Chip key={v} on={f.bmiMax === v} onClick={() => set({ filters: { ...f, bmiMax: f.bmiMax === v ? 0 : v } })}>
+            {label}
+          </Chip>
+        ))}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">

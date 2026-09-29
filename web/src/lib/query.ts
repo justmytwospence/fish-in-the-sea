@@ -7,7 +7,7 @@ export const DEFAULT_QUERY: Query = {
   market: DEFAULT_MARKET,
   me: { sex: 1, age: 36 },
   seek: { sex: 2, lo: 30, hi: 39 },
-  filters: { neverMarried: false, edu: 0, noKids: false },
+  filters: { neverMarried: false, edu: 0, noKids: false, notWithParents: false, incomeMin: 0, nonSmoker: false, bmiMax: 0 },
   model: { separated: false, orientation: true, relationship: true, looking: false, spark: 0 },
   you: {},
 };
@@ -41,6 +41,10 @@ export function parseQuery(p: Params): Query {
     edu: f.has("grad") ? 2 : f.has("ba") ? 1 : 0,
     noKids: f.has("nokids"),
     height: f.has("hle") ? "le" : f.has("hge") ? "ge" : f.has("hany") ? "any" : undefined,
+    notWithParents: f.has("nopar"),
+    incomeMin: f.has("inc120") ? 3 : f.has("inc60") ? 2 : f.has("inc25") ? 1 : 0,
+    nonSmoker: f.has("nosmoke"),
+    bmiMax: f.has("bmi25") ? 25 : f.has("bmi30") ? 30 : 0,
   };
   const m = new Set((get(p, "m") ?? "").split(",").filter(Boolean));
   q.model = {
@@ -77,6 +81,10 @@ export function serializeQuery(q: Query): string {
     q.filters.edu === 2 && "grad",
     q.filters.noKids && "nokids",
     q.filters.height && `h${q.filters.height}`,
+    q.filters.notWithParents && "nopar",
+    q.filters.incomeMin > 0 && `inc${[0, 25, 60, 120][q.filters.incomeMin]}`,
+    q.filters.nonSmoker && "nosmoke",
+    q.filters.bmiMax > 0 && `bmi${q.filters.bmiMax}`,
   ].filter(Boolean);
   if (f.length) p.set("f", f.join(","));
   const m = [
