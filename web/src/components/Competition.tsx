@@ -4,7 +4,7 @@ import { SOURCES } from "@/lib/assumptions";
 import { incomeWeights, type You } from "@/lib/competition";
 import { noun, type Query, type Result } from "@/lib/model";
 import { approx, fmt, pct } from "@/lib/format";
-import { RACES, RELIGIONS } from "@/lib/types";
+import { PARTIES, RACES, RELIGIONS } from "@/lib/types";
 
 const EDU = ["No degree", "Bachelor's", "Graduate"];
 const INC = ["Under $25k", "$25–60k", "$60–120k", "$120k+"];
@@ -237,12 +237,36 @@ export default function Competition({
   const set = (patch: Partial<You>) => onYou({ ...you, ...patch });
   const one = noun(query.seek.sex, false);
   const mult = c.multiplier;
+  const x2c = (v: number) => (v >= 10 ? fmt(v) : v.toFixed(2));
 
-  let verdict: string;
-  if (mult < 0.5) verdict = "On paper, you're a long shot.";
-  else if (mult < 0.9) verdict = "You're outnumbered.";
-  else if (mult <= 1.1) verdict = "About a fair fight.";
-  else verdict = "The market tilts your way.";
+  // Two separate questions: is the market itself crowded (competitors per
+  // person, nothing to do with you), and how do you compare with a typical
+  // serious competitor? The adjusted pool combines them.
+  const market = c.ratio < 0.9 ? "open" : c.ratio <= 1.1 ? "even" : "crowded";
+  const standing = c.relative > 1.1 ? "strong" : c.relative >= 0.9 ? "typical" : "weak";
+  const VERDICTS: Record<string, string> = {
+    "open-strong": "The market tilts your way, and you're a strong match.",
+    "open-typical": "The market genuinely tilts your way.",
+    "open-weak": "The market tilts your way, which helps: on paper, you're not their type.",
+    "even-strong": "A fair market, and you stand out in it.",
+    "even-typical": "About a fair fight.",
+    "even-weak": "A fair market, but you're outmatched on paper.",
+    "crowded-strong":
+      mult >= 1 ? "A crowded market, but you out-compete it." : "A crowded market. You're above average, just not by enough.",
+    "crowded-typical": "You're outnumbered.",
+    "crowded-weak": mult < 0.5 ? "On paper, you're a long shot." : "Crowded, and you're not their type on paper.",
+  };
+  const verdict = VERDICTS[`${market}-${standing}`];
+  const marketText = {
+    open: `fewer ${us} in the running than ${them} (${x2c(c.ratio)} per ${one})`,
+    even: `about one of ${us} in the running per ${one} (${x2c(c.ratio)})`,
+    crowded: `${x2c(c.ratio)} ${us} in the running per ${one}`,
+  }[market];
+  const standingText = {
+    strong: `${x2c(c.relative)}× a typical competitor's appeal`,
+    typical: `about as appealing as a typical competitor (${x2c(c.relative)}×)`,
+    weak: `${x2c(c.relative)}× a typical competitor's appeal`,
+  }[standing];
 
   const heights = Array.from({ length: 31 }, (_, i) => 56 + i);
   const oppositeSex = query.me.sex !== query.seek.sex;
@@ -252,6 +276,26 @@ export default function Competition({
     <section aria-label="Competition" className="mt-16 border-t border-rule pt-10">
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">The competition</p>
       <h2 className="mt-3 font-display text-3xl tracking-tight">{verdict}</h2>
+      <dl className="mt-4 grid max-w-2xl gap-3 text-sm sm:grid-cols-2">
+        <div className="rounded-lg border border-rule bg-card p-3">
+          <dt className="text-xs uppercase tracking-widest text-muted">
+            The market:{" "}
+            <span className={market === "open" ? "text-cool" : market === "crowded" ? "text-accent" : "text-ink"}>
+              {market === "open" ? "tilted your way" : market === "even" ? "balanced" : "crowded"}
+            </span>
+          </dt>
+          <dd className="mt-1">{marketText}. This part has nothing to do with you.</dd>
+        </div>
+        <div className="rounded-lg border border-rule bg-card p-3">
+          <dt className="text-xs uppercase tracking-widest text-muted">
+            You:{" "}
+            <span className={standing === "strong" ? "text-cool" : standing === "weak" ? "text-accent" : "text-ink"}>
+              {standing === "strong" ? "a strong match" : standing === "typical" ? "typical" : "a weaker match"}
+            </span>
+          </dt>
+          <dd className="mt-1">{standingText}, based on what they go for.</dd>
+        </div>
+      </dl>
       <p className="mt-3 max-w-xl text-muted">
         A headcount pretends you&apos;re the only one looking. You&apos;re not. Here&apos;s your pool again, adjusted
         for how many other {us} are after the same {them} and how you stack up against them.
@@ -308,6 +352,12 @@ export default function Competition({
           <IncomeSlider value={you.income} onChange={(income) => set({ income })} />
           <YouSelect label="Kids at home" value={you.kids} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(kids) => set({ kids })} />
           <YouSelect label="Been married" value={you.prev} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(prev) => set({ prev })} />
+          <YouSelect
+            label="Politics"
+            value={you.politics}
+            options={PARTIES.map((l, v) => ({ v, label: l }))}
+            onChange={(politics) => set({ politics })}
+          />
           <YouSelect
             label="Religion"
             value={you.religion}
@@ -376,6 +426,15 @@ export default function Competition({
             </tbody>
           </table>
         </div>
+        {c.prefs.politicsRows && (
+          <PairTable
+            title="Politics (who ends up with whom)"
+            labels={["Dem.", "Ind.", "Rep."]}
+            rows={c.prefs.politicsRows}
+            you={you.politics}
+            note="Party of both partners in Stanford's How Couples Meet and Stay Together 2017, relative to random pairing."
+          />
+        )}
         {c.prefs.religionRows && (
           <PairTable
             title="Religion (who ends up with whom)"

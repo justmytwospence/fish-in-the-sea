@@ -17,6 +17,7 @@ export const DEFAULT_QUERY: Query = {
     bmiMax: 0,
     races: [],
     religions: [],
+    politics: [],
   },
   model: { separated: false, orientation: true, relationship: true, looking: false, spark: 0 },
   you: {},
@@ -57,6 +58,7 @@ export function parseQuery(p: Params): Query {
     bmiMax: f.has("bmi25") ? 25 : f.has("bmi30") ? 30 : 0,
     races: [0, 1, 2, 3, 4].filter((r) => f.has(`race${r}`)),
     religions: [0, 1, 2, 3, 4, 5].filter((r) => f.has(`rel${r}`)),
+    politics: [0, 1, 2].filter((r) => f.has(`pol${r}`)),
   };
   const m = new Set((get(p, "m") ?? "").split(",").filter(Boolean));
   q.model = {
@@ -69,7 +71,7 @@ export function parseQuery(p: Params): Query {
   // you=e1,i85,k0,p0,h70: education, income ($k), kids, previously married, height
   q.you = {};
   for (const part of (get(p, "you") ?? "").split(",")) {
-    const m2 = part.match(/^([eikphrg])(\d{1,3})$/);
+    const m2 = part.match(/^([eikphrgv])(\d{1,3})$/);
     if (!m2) continue;
     const v = +m2[2];
     if (m2[1] === "e" && v <= 2) q.you.edu = v;
@@ -79,6 +81,7 @@ export function parseQuery(p: Params): Query {
     if (m2[1] === "h" && v >= 54 && v <= 84) q.you.height = v;
     if (m2[1] === "r" && v <= 4) q.you.race = v;
     if (m2[1] === "g" && v <= 5) q.you.religion = v;
+    if (m2[1] === "v" && v <= 2) q.you.politics = v;
   }
   return q;
 }
@@ -101,6 +104,7 @@ export function serializeQuery(q: Query): string {
     q.filters.bmiMax > 0 && `bmi${q.filters.bmiMax}`,
     ...[...q.filters.races].sort().map((r) => `race${r}`),
     ...[...q.filters.religions].sort().map((r) => `rel${r}`),
+    ...[...q.filters.politics].sort().map((r) => `pol${r}`),
   ].filter(Boolean);
   if (f.length) p.set("f", f.join(","));
   const m = [
@@ -120,6 +124,7 @@ export function serializeQuery(q: Query): string {
     y.height !== undefined && `h${y.height}`,
     y.race !== undefined && `r${y.race}`,
     y.religion !== undefined && `g${y.religion}`,
+    y.politics !== undefined && `v${y.politics}`,
   ].filter(Boolean);
   if (you.length) p.set("you", you.join(","));
   return p.toString().replace(/%2C/g, ",");

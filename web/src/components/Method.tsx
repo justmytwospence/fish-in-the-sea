@@ -79,6 +79,14 @@ export default function Method({ dataYear }: { dataYear: string }) {
           couples under 45 in the GSS, relative to random pairing.
         </p>
         <p>
+          <strong>Politics.</strong> Party identification (with leaners counted as partisans) of unmarried adults by
+          sex and age from the <Src s={SOURCES.gss} /> (2016–2024), with the Democratic-versus-Republican odds
+          shifted by how the metro voted in 2024 relative to the country (<Src s={SOURCES.election} />). Political
+          pairing in the competition model comes from both partners&apos; party in{" "}
+          <Src s={SOURCES.hcmstPolitics} />, relative to random pairing. Like religion, it&apos;s applied as independent
+          of the other filters.
+        </p>
+        <p>
           <strong>Height and health.</strong> Height filters use measured heights by sex and age from{" "}
           <Src s={SOURCES.nhanes} />. Smoking and BMI start from NHANES rates for unpartnered adults by sex and age
           (BMI is measured, not self-reported), then shift up or down by how the metro, or its state where the CDC

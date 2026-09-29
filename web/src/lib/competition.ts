@@ -15,7 +15,7 @@
 
 import { heightDist, heightLogAppeal, KIDS_LOG, type Sex } from "./assumptions";
 import type { Query } from "./model";
-import { NRACE, NREL, NTYPE, typeOf, type Typed } from "./types";
+import { NPOL, NRACE, NREL, NTYPE, typeOf, type Typed } from "./types";
 
 export interface ChoiceDir {
   n: number;
@@ -40,6 +40,7 @@ export interface You {
   height?: number; // inches
   race?: number; // see RACES in types.ts
   religion?: number; // see RELIGIONS in types.ts
+  politics?: number; // see PARTIES in types.ts
 }
 
 export interface CompStep {
@@ -68,6 +69,7 @@ export interface Competition {
     eduRows: { share: number; appeal: number[] }[];
     raceRows: { share: number; appeal: number[] }[] | null;
     religionRows: { share: number; appeal: number[] }[] | null;
+    politicsRows: { share: number; appeal: number[] }[] | null;
     inc: number[];
     kids: number[];
     prev: number[];
@@ -159,6 +161,7 @@ export function compete(
   q: Query,
   detail = true,
   religionPairing?: number[][],
+  politicsPairing?: number[][],
 ): Competition | null {
   const T = q.seek.sex; // chooser: your target
   const M = q.me.sex; // candidate: you and your competitors
@@ -222,7 +225,7 @@ export function compete(
   // i; kappa[i][j] is the average appeal of competitors aged j to them.
   const a0 = Math.min(comps.hi, Math.max(comps.lo, q.me.age)) - comps.lo;
   interface Mixed {
-    key: "race" | "religion";
+    key: "race" | "religion" | "politics";
     n: number;
     rsC: number[][];
     rb: number[][];
@@ -232,7 +235,7 @@ export function compete(
   }
   const mixed = (key: Mixed["key"], table: number[][] | undefined, n: number, youCode: number | undefined): Mixed | null => {
     if (!table) return null;
-    const field = key === "race" ? "race" : "rel";
+    const field = key === "race" ? "race" : key === "religion" ? "rel" : "pol";
     const R = table.map((row) => {
       const mx = Math.max(...row);
       return row.map((v) => Math.exp(v - mx));
@@ -254,7 +257,11 @@ export function compete(
     const rows = R.map((row, x) => ({ share: rsT.reduce((a, t, i) => a + (Nage[i] / Ntot) * t[x], 0), appeal: row }));
     return { key, n, rsC, rb, kappa, youRb, rows };
   };
-  const dims = [mixed("race", dir.race, NRACE, q.you.race), mixed("religion", religionPairing, NREL, q.you.religion)].filter(
+  const dims = [
+    mixed("race", dir.race, NRACE, q.you.race),
+    mixed("religion", religionPairing, NREL, q.you.religion),
+    mixed("politics", politicsPairing, NPOL, q.you.politics),
+  ].filter(
     (d): d is Mixed => d !== null,
   );
   const kappaOf = (ds: Mixed[]) => {
@@ -317,7 +324,7 @@ export function compete(
     }
     if (useHeight) steps.push({ key: "height", label: "…and height", value: pull(Pall, true).E });
     dims.forEach((d, k) => {
-      const label = d.key === "race" ? "…and race/ethnicity" : "…and religion";
+      const label = { race: "…and race/ethnicity", religion: "…and religion", politics: "…and politics" }[d.key];
       steps.push({ key: d.key, label, value: k === dims.length - 1 ? last.E : pull(Pall, useHeight, kappaOf(dims.slice(0, k + 1))).E });
     });
   }
@@ -390,20 +397,30 @@ export function compete(
   let below = 0;
   let sumW = 0;
   let sumW2 = 0;
+  // The totals factor by trait (each competitor's appeal and mix are products
+  // across traits), so they don't need the full cross of groups; only the
+  // percentile, shown on the page but not in rankings, walks every combination.
+  const mom1 = Array.from({ length: nAy }, (_, j) =>
+    dims.reduce((a, d, di) => a * d.rsC[j].reduce((t, v, k) => t + v * rbAvg[di][k], 0), 1),
+  );
+  const mom2 = Array.from({ length: nAy }, (_, j) =>
+    dims.reduce((a, d, di) => a * d.rsC[j].reduce((t, v, k) => t + v * rbAvg[di][k] ** 2, 0), 1),
+  );
   for (let j = 0; j < nAy; j++)
     for (let y = 0; y < NTYPE; y++) {
       const m0 = comps.m[j * NTYPE + y];
       if (m0 <= 0) continue;
       let s0 = 0;
       for (let i = 0; i < nAx; i++) s0 += A[i * nAy + j] * compH[i] * H[i * NTYPE + y];
+      sumW += m0 * s0 * mom1[j];
+      sumW2 += m0 * s0 * s0 * mom2[j];
+      if (!detail) continue;
       for (let ci = 0; ci < combos.length; ci++) {
         let m = m0;
         combos[ci].forEach((k, d) => (m *= dims[d].rsC[j][k]));
         if (m <= 0) continue;
-        const s = s0 * comboAppeal[ci];
-        sumW += m * s;
-        sumW2 += m * s * s;
-        if (s < score) below += m * s;
+        const sc = s0 * comboAppeal[ci];
+        if (sc < score) below += m * sc;
       }
     }
   const typical = sumW > 0 ? sumW2 / sumW : 0;
@@ -422,6 +439,7 @@ export function compete(
 
   const raceRows = dims.find((d) => d.key === "race")?.rows ?? null;
   const religionRows = dims.find((d) => d.key === "religion")?.rows ?? null;
+  const politicsRows = dims.find((d) => d.key === "politics")?.rows ?? null;
 
   // Preference profiles for display.
   const ages: number[] = [];
@@ -464,6 +482,7 @@ export function compete(
       eduRows,
       raceRows,
       religionRows,
+      politicsRows,
       inc: level("inc"),
       kids: level("kids"),
       prev: level("prev"),

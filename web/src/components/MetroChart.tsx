@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RankResponse, Sort } from "@/app/api/rank/route";
+import type { RankResponse } from "@/app/api/rank/route";
 import { fmt, shortCity } from "@/lib/format";
 
 type Row = RankResponse["all"][number];
@@ -13,13 +13,15 @@ const M = { top: 16, right: 16, bottom: 44, left: 48 };
 // curves are constant adjusted pools. Your metro, its ranking neighbors and
 // the leaders are emphasized; everything else stays recessive.
 export default function MetroChart({
-  data,
-  sort,
+  rows: input,
+  topIds,
+  neighborIds,
   current,
   onPick,
 }: {
-  data: RankResponse;
-  sort: Sort;
+  rows: Row[];
+  topIds: Set<string>;
+  neighborIds: Set<string>;
   current: string;
   onPick: (id: string) => void;
 }) {
@@ -34,9 +36,7 @@ export default function MetroChart({
   }, []);
 
   const h = Math.round(Math.min(420, Math.max(300, w * 0.62)));
-  const rows = useMemo(() => data.all.filter((r) => r[2] >= 1 && r[4] > 0), [data]);
-  const neighborIds = useMemo(() => new Set((data.around?.[sort] ?? []).map((x) => x.row.id)), [data, sort]);
-  const topIds = useMemo(() => new Set((data.top?.[sort] ?? []).slice(0, 5).map((r) => r.id)), [data, sort]);
+  const rows = useMemo(() => input.filter((r) => r[2] >= 1 && r[4] > 0), [input]);
 
   const lx0 = Math.floor(Math.log10(Math.max(1, Math.min(...rows.map((r) => r[2])))));
   const lx1 = Math.max(lx0 + 1, Math.ceil(Math.log10(Math.max(...rows.map((r) => r[2])))));

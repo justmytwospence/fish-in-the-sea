@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { noun, type Query, type Result } from "@/lib/model";
 import { fmt, pct, shortCity } from "@/lib/format";
-import { RACES, RELIGIONS } from "@/lib/types";
+import { PARTIES, RACES, RELIGIONS } from "@/lib/types";
 
 // Ordinal ramp from the accent hue: lightest = first level.
 const RAMP = [22, 45, 70, 100];
@@ -142,6 +142,27 @@ export default function WhoIsLeft({ result, query, dataYear }: { result: Result;
             {RELIGIONS.map((label, r) => {
               const tot = c.religion.reduce((a, b) => a + b, 0) || 1;
               const v = c.religion[r] / tot;
+              return (
+                <li key={label} className="flex items-center gap-2" title={`${label}: ${pct(v)}`}>
+                  <span className="w-28 shrink-0 text-muted">{label}</span>
+                  <span className="h-2 flex-1 overflow-hidden rounded-[4px] bg-rule/40">
+                    <span className="block h-full rounded-[4px] bg-accent" style={{ width: `${v * 100}%` }} />
+                  </span>
+                  <span className="w-10 text-right tabular-nums">{pct(v)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+        <div>
+          <p className="text-sm font-medium">
+            Politics{" "}
+            <span className="rounded bg-accent-soft px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-accent">est.</span>
+          </p>
+          <ul className="mt-2 space-y-1 text-xs">
+            {PARTIES.map((label, r) => {
+              const tot = c.politics.reduce((a, b) => a + b, 0) || 1;
+              const v = c.politics[r] / tot;
               return (
                 <li key={label} className="flex items-center gap-2" title={`${label}: ${pct(v)}`}>
                   <span className="w-28 shrink-0 text-muted">{label}</span>

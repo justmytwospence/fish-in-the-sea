@@ -20,7 +20,12 @@ export interface Typed {
   m: Float64Array; // (age - lo) * NTYPE + type
   race: Float64Array; // (age - lo) * NRACE + race, same people as m
   rel: Float64Array; // (age - lo) * NREL + religion, same people as m
+  pol: Float64Array; // (age - lo) * NPOL + party, same people as m
 }
+
+// Political leaning (party identification, leaners with their party).
+export const NPOL = 3;
+export const PARTIES = ["Democratic", "Independent", "Republican"];
 
 // Religion: 0 Protestant (incl. nondenominational Christian), 1 Catholic,
 // 2 Latter-day Saint, 3 Jewish, 4 other religion, 5 none.

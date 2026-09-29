@@ -43,11 +43,12 @@ npx mapshaper -i shp/cb_2024_us_cbsa_20m.shp name=cbsa -filter 'NAME.indexOf(", 
 npx mapshaper -i shp/cb_2024_us_state_20m.shp name=states -filter 'STATEFP != "72"' -filter-fields STUSPS -proj albersusa -simplify 12% -o states.json format=topojson quantization=10000
 npx mapshaper -i cbsa.json states.json combine-files -o ../../web/public/data/map.json format=topojson bbox
 
-cd .. && uv run python build.py && uv run python choice.py && uv run python context.py && uv run python religion.py
+cd .. && uv run python build.py && uv run python choice.py && uv run python context.py && uv run python religion.py && uv run python politics.py
 ```
 
 - `build.py` writes per-metro counts (ACS scaled to the 2025 estimates) and attribute mixes.
 - `choice.py` fits the revealed-preference model behind the competition section (a conditional logit on recently formed couples versus sampled single alternatives, about a minute).
+- `politics.py` writes national party identification rates (GSS), political pairing (HCMST 2017, `raw/hcmst2017.dta` from data.stanford.edu/hcmst2017) and per-metro shifts from the 2024 vote.
 - `religion.py` writes national religion rates, religious pairing and per-metro local shifts.
 - `context.py` writes heights, health rates and per-metro context (health shifts, 2024 vote) and pulls BRFSS from data.cdc.gov.
 

@@ -4,7 +4,8 @@ import { loadChoice, loadGlobal, loadMarkets, loadShard } from "@/lib/server-dat
 
 // raw: people through your sieve; adjusted: that pool adjusted for
 // competition; odds: the adjustment itself (adjusted / raw).
-export type Sort = "raw" | "adjusted" | "odds";
+// crowd: fewest competitors in the running per person (the market alone).
+export type Sort = "raw" | "adjusted" | "crowd" | "odds";
 
 export interface RankRow {
   id: string;
@@ -14,6 +15,7 @@ export interface RankRow {
   value: number; // your pool
   adjusted: number; // your pool, adjusted for competition
   multiplier: number; // adjusted / value
+  ratio: number; // competitors in the running per person in your pool
 }
 
 export interface RankResponse {
@@ -22,8 +24,9 @@ export interface RankResponse {
   top: Record<Sort, RankRow[]>;
   // Your metro and the NEIGHBORS on either side of it, with ranks.
   around: Record<Sort, { rank: number; row: RankRow }[]>;
-  // Every metro, for the chart and map: [id, name, pool, adjusted, multiplier, cbsa, population]
-  all: [string, string, number, number, number, string, number][];
+  // Every metro, for the chart, map and list:
+  // [id, name, pool, adjusted, multiplier, cbsa, population, competitors per person]
+  all: [string, string, number, number, number, string, number, number][];
 }
 
 const NEIGHBORS = 5;
@@ -56,6 +59,7 @@ export async function GET(req: Request) {
         value: r.final.value,
         adjusted: r.final.value * mult,
         multiplier: r.final.value >= MIN_POOL ? mult : 0,
+        ratio: r.final.value >= MIN_POOL ? (r.competition?.ratio ?? 0) : 0,
       });
     }),
   );
@@ -63,12 +67,14 @@ export async function GET(req: Request) {
   const sorted: Record<Sort, RankRow[]> = {
     raw: [...rows].sort((a, b) => b.value - a.value),
     adjusted: [...rows].sort((a, b) => b.adjusted - a.adjusted),
+    crowd: [...rows].sort((a, b) => (a.ratio || Infinity) - (b.ratio || Infinity)),
     odds: [...rows].sort((a, b) => b.multiplier - a.multiplier),
   };
   const mine = rows.find((r) => r.id === query.market);
   const rankOf = (r: RankRow) => ({
     raw: sorted.raw.indexOf(r) + 1,
     adjusted: sorted.adjusted.indexOf(r) + 1,
+    crowd: sorted.crowd.indexOf(r) + 1,
     odds: sorted.odds.indexOf(r) + 1,
   });
   const body: RankResponse = {
@@ -77,11 +83,13 @@ export async function GET(req: Request) {
     top: {
       raw: sorted.raw.slice(0, 10),
       adjusted: sorted.adjusted.slice(0, 10),
+      crowd: sorted.crowd.slice(0, 10),
       odds: sorted.odds.slice(0, 10),
     },
     around: {
       raw: neighbors(sorted.raw, mine),
       adjusted: neighbors(sorted.adjusted, mine),
+      crowd: neighbors(sorted.crowd, mine),
       odds: neighbors(sorted.odds, mine),
     },
     all: rows.map((r) => [
@@ -92,6 +100,7 @@ export async function GET(req: Request) {
       Math.round(r.multiplier * 1000) / 1000,
       r.cbsa,
       r.pop,
+      Math.round(r.ratio * 1000) / 1000,
     ]),
   };
   return Response.json(body, {

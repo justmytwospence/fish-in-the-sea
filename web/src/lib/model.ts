@@ -8,7 +8,7 @@ import {
   type Source,
 } from "./assumptions";
 import { compete, type Choice, type Competition, type You } from "./competition";
-import { NRACE, NREL, NTYPE, RACES, RELIGIONS, typeIndex, type Typed } from "./types";
+import { NPOL, NRACE, NREL, NTYPE, PARTIES, RACES, RELIGIONS, typeIndex, type Typed } from "./types";
 
 export type Marg = "nm" | "sep" | "wid" | "div" | "mar";
 type UMarg = Exclude<Marg, "mar">;
@@ -60,6 +60,7 @@ export interface Global {
   health?: HealthNational;
   ctx?: Record<string, MarketCtx>;
   religion?: ReligionData;
+  politics?: PoliticsData;
 }
 
 export interface Query {
@@ -77,6 +78,7 @@ export interface Query {
     incomeMin: 0 | 1 | 2 | 3; // income bracket floor: none, $25k+, $60k+, $120k+
     races: number[]; // race/ethnicity codes to include; empty = any
     religions: number[]; // religion codes to include; empty = any
+    politics: number[]; // party codes to include; empty = any
     nonSmoker: boolean;
     bmiMax: 0 | 25 | 30; // 0 = no BMI filter
   };
@@ -114,6 +116,7 @@ export interface Composition {
   parents: number[]; // lives on own, with parents
   race: number[]; // by race/ethnicity code
   religion: number[]; // by religion code
+  politics: number[]; // by party code
   smoke: number | null; // estimated share, when health data is available
   obese: number | null;
   over: number | null;
@@ -146,8 +149,16 @@ export interface ReligionData {
   markets: Record<string, number[]>; // log shift of local vs. national shares
 }
 
-export function mergeContext(g: Global, c: Context, r?: ReligionData): Global {
-  return { ...g, health: c.health, ctx: c.markets, religion: r };
+// Shape of politics.json (see pipeline/politics.py).
+export interface PoliticsData {
+  bands: [number, number][];
+  national: Record<"1" | "2", number[][]>; // [band][party], unmarried adults
+  pairing: Record<string, number[][]>;
+  markets: Record<string, number>; // log-odds shift of the 2024 two-party D share
+}
+
+export function mergeContext(g: Global, c: Context, r?: ReligionData, pol?: PoliticsData): Global {
+  return { ...g, health: c.health, ctx: c.markets, religion: r, politics: pol };
 }
 
 export const NCELL = 97;
@@ -282,6 +293,23 @@ function pool(
     const m = relMix(a);
     return m ? relPicked.reduce((t, r) => t + m[r], 0) : 1;
   };
+  // Political leaning: national GSS rates by sex and age, with the
+  // Democratic vs. Republican odds shifted by the metro's 2024 vote.
+  const polMix = (a: number) => {
+    const P = g.politics;
+    if (!P) return null;
+    const i = Math.max(0, P.bands.findIndex(([lo, hi]) => a >= lo && a <= hi));
+    const d = (P.markets[s.id] ?? 0) / 2;
+    const v = P.national[sx][i].map((p, k) => p * Math.exp(k === 0 ? d : k === 2 ? -d : 0));
+    const tot = v.reduce((x, y) => x + y, 0);
+    return v.map((x) => x / tot);
+  };
+  const polPicked = withFilters && f.politics.length ? f.politics : null;
+  const fPol = (a: number) => {
+    if (!polPicked) return 1;
+    const m = polMix(a);
+    return m ? polPicked.reduce((t, r) => t + m[r], 0) : 1;
+  };
   const fBmi = (a: number) =>
     withFilters && f.bmiMax ? 1 - (rate(f.bmiMax === 30 ? "obese" : "over", a) ?? 0) : 1;
   const comp: Composition = {
@@ -294,6 +322,7 @@ function pool(
     parents: [0, 0],
     race: new Array(NRACE).fill(0),
     religion: new Array(NREL).fill(0),
+    politics: new Array(NPOL).fill(0),
     smoke: g.health ? 0 : null,
     obese: g.health ? 0 : null,
     over: g.health ? 0 : null,
@@ -313,6 +342,7 @@ function pool(
     smoke: acc(),
     bmi: acc(),
     religion: acc(),
+    politics: acc(),
     orientation: acc(),
     relationship: acc(),
     looking: acc(),
@@ -323,6 +353,7 @@ function pool(
       m: new Float64Array((hi - lo + 1) * NTYPE),
       race: new Float64Array((hi - lo + 1) * NRACE),
       rel: new Float64Array((hi - lo + 1) * NREL),
+      pol: new Float64Array((hi - lo + 1) * NPOL),
     } as Typed,
     race: acc(),
     comp,
@@ -369,7 +400,8 @@ function pool(
       const fs = (a: number) => fh(a) * fSmoke(a);
       const fb = (a: number) => fs(a) * fBmi(a);
       const fg = (a: number) => fb(a) * fRel(a);
-      const fo = (a: number) => fg(a) * (q.model.orientation ? attraction(sex, towards, a) : 1);
+      const fp = (a: number) => fg(a) * fPol(a);
+      const fo = (a: number) => fp(a) * (q.model.orientation ? attraction(sex, towards, a) : 1);
       const fr = (a: number) => fo(a) * (q.model.relationship ? 1 - inRelationship(sex, a) : 1);
       const fl = (a: number) => fr(a) * (q.model.looking ? looking(sex, a) : 1);
       const spark = q.model.spark > 0 ? q.model.spark : 1;
@@ -377,6 +409,7 @@ function pool(
       add(out.smoke, C, varC, pFinal, n, avg(fs));
       add(out.bmi, C, varC, pFinal, n, avg(fb));
       add(out.religion, C, varC, pFinal, n, avg(fg));
+      add(out.politics, C, varC, pFinal, n, avg(fp));
       add(out.orientation, C, varC, pFinal, n, avg(fo));
       add(out.relationship, C, varC, pFinal, n, avg(fr));
       add(out.looking, C, varC, pFinal, n, avg(fl));
@@ -401,6 +434,15 @@ function pool(
           const v = inPool * raceKept * (kept[r] / keptSum);
           out.typed.rel[(a - lo) * NREL + r] += v;
           comp.religion[r] += v;
+        }
+        // Political leaning among those left.
+        const pm = polMix(a) ?? new Array(NPOL).fill(1 / NPOL);
+        const pk = polPicked ? pm.map((v, r) => (polPicked.includes(r) ? v : 0)) : pm;
+        const pkSum = pk.reduce((x, y) => x + y, 0) || 1;
+        for (let r = 0; r < NPOL; r++) {
+          const v = inPool * raceKept * (pk[r] / pkSum);
+          out.typed.pol[(a - lo) * NPOL + r] += v;
+          comp.politics[r] += v;
         }
         // Health shares among those left (zero for anything filtered out).
         const sm = f.nonSmoker && withFilters ? 0 : (rate("smoke", a) ?? 0);
@@ -502,6 +544,11 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
     push("religion", names.join(", "), "other religions (or none)", t.religion, "survey", [SOURCES.gss, SOURCES.religionLocal],
       "National religious identification of unmarried adults by sex and age (General Social Survey 2016-2024), shifted by how this state or metro differs from the US. Applied as independent of every other filter.");
   }
+  if (q.filters.politics.length && g.politics) {
+    const names = [...q.filters.politics].sort().map((r) => PARTIES[r]);
+    push("politics", names.join(" or "), "other political leanings", t.politics, "survey", [SOURCES.gss, SOURCES.election],
+      "Party identification of unmarried adults by sex and age (General Social Survey 2016-2024, leaners counted with their party), with Democratic vs. Republican odds shifted by how this metro voted in 2024 relative to the country. Applied as independent of every other filter.");
+  }
   if (q.filters.bmiMax && g.health)
     push("bmi", q.filters.bmiMax === 25 ? "BMI under 25" : "BMI under 30", q.filters.bmiMax === 25 ? "BMI 25 or higher" : "BMI 30 or higher",
       t.bmi, "survey", [SOURCES.nhanes, SOURCES.brfss],
@@ -536,11 +583,13 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
       f.neverMarried || f.edu > 0 || f.noKids || f.notWithParents || f.incomeMin > 0 || f.nonSmoker || f.bmiMax > 0 ||
       f.races.length > 0 ||
       f.religions.length > 0 ||
+      f.politics.length > 0 ||
       heightFilter(q) !== null;
     const base = filtered ? pool(s, g, q, T, M, lo, hi, false) : t;
     const relPairing = g.religion?.pairing[`${T}${M}`];
-    const market = compete(choice, base.typed, comp.typed, q, detail, relPairing);
-    const mine = filtered ? compete(choice, t.typed, comp.typed, q, detail, relPairing) : market;
+    const polPairing = g.politics?.pairing[`${T}${M}`];
+    const market = compete(choice, base.typed, comp.typed, q, detail, relPairing, polPairing);
+    const mine = filtered ? compete(choice, t.typed, comp.typed, q, detail, relPairing, polPairing) : market;
     if (market && mine) {
       const multiplier = market.ratio > 0 ? mine.relative / market.ratio : 0;
       competition = {

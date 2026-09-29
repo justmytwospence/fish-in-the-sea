@@ -151,6 +151,10 @@ export const SOURCES = {
     label: "Pew (2017), Americans see men as the financial providers",
     url: "https://www.pewresearch.org/short-reads/2017/09/20/americans-see-men-as-the-financial-providers-even-as-womens-contributions-grow/",
   },
+  hcmstPolitics: {
+    label: "Stanford How Couples Meet and Stay Together 2017 (partners' party)",
+    url: "https://data.stanford.edu/hcmst2017",
+  },
   religionLocal: {
     label: "Local religious composition (see methodology)",
     url: "https://www.pewresearch.org/religious-landscape-study/",

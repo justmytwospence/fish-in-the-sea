@@ -39,6 +39,7 @@ export function whatIfs(s: Shard, g: Global, q: Query, choice: Choice): { base: 
     });
   if (f.races.length) cands.push({ key: "race", label: "Drop the race/ethnicity filter", query: withF({ races: [] }) });
   if (f.religions.length) cands.push({ key: "religion", label: "Drop the religion filter", query: withF({ religions: [] }) });
+  if (f.politics.length) cands.push({ key: "politics", label: "Drop the politics filter", query: withF({ politics: [] }) });
   if (f.nonSmoker) cands.push({ key: "smoke", label: "Accept smokers", query: withF({ nonSmoker: false }) });
   if (f.bmiMax === 25) cands.push({ key: "bmi", label: "Loosen BMI to under 30", query: withF({ bmiMax: 30 }) });
   if (f.bmiMax === 30) cands.push({ key: "bmi", label: "Drop the BMI filter", query: withF({ bmiMax: 0 }) });
