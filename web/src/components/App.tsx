@@ -10,6 +10,8 @@ import Sieve from "./Sieve";
 import Receipts from "./Receipts";
 import Verdict from "./Verdict";
 import WhoIsLeft from "./WhoIsLeft";
+import WhatIfs from "./WhatIfs";
+import { whatIfs } from "@/lib/whatif";
 import Competition from "./Competition";
 import Leaderboard from "./Leaderboard";
 import Method from "./Method";
@@ -79,6 +81,7 @@ export default function App({
   const [query, setQuery] = useState(initialQuery);
   const [result, setResult] = useState(initialResult);
   const [data, setData] = useState<[Global, Choice] | null>(null);
+  const [loosen, setLoosen] = useState<ReturnType<typeof whatIfs> | null>(null);
   const reqId = useRef(0);
   const qs = useMemo(() => serializeQuery(query), [query]);
 
@@ -98,7 +101,9 @@ export default function App({
     const id = ++reqId.current;
     fetchShard(query.market)
       .then((s) => {
-        if (id === reqId.current) setResult(compute(s, data[0], query, data[1]));
+        if (id !== reqId.current) return;
+        setResult(compute(s, data[0], query, data[1]));
+        setLoosen(whatIfs(s, data[0], query, data[1]));
       })
       .catch(() => {});
   }, [query, qs, data]);
@@ -135,6 +140,9 @@ export default function App({
       <Verdict result={result} query={query} />
       <WhoIsLeft result={result} query={query} dataYear={dataYear} />
       <Competition result={result} query={query} onYou={(you) => setQuery((q) => ({ ...q, you }))} />
+      {loosen && loosen.options.length > 0 && (
+        <WhatIfs base={loosen.base} options={loosen.options} onApply={(q) => setQuery(q)} />
+      )}
       <Leaderboard qs={qs} query={query} onPick={(market) => setQuery((q) => ({ ...q, market }))} />
       <Method dataYear={dataYear} />
     </main>
