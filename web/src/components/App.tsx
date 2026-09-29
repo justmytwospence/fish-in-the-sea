@@ -18,7 +18,8 @@ import Competition from "./Competition";
 import Leaderboard from "./Leaderboard";
 import Method from "./Method";
 
-const STORAGE_KEY = "the-denominator:search";
+const STORAGE_KEY = "fish-in-the-sea:search";
+const OLD_STORAGE_KEY = "the-denominator:search"; // before the rename
 
 const shardCache = new Map<string, Promise<Shard>>();
 let staticPromise: Promise<[Global, Choice]> | undefined;
@@ -99,7 +100,9 @@ export default function App({
     const fromLink = p.has("in") || p.has("me") || p.has("seek");
     let saved: string | null = null;
     try {
-      saved = fromLink ? null : window.localStorage.getItem(STORAGE_KEY);
+      saved = fromLink
+        ? null
+        : (window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(OLD_STORAGE_KEY));
     } catch {}
     if (saved) {
       Promise.resolve().then(() => {
@@ -141,7 +144,7 @@ export default function App({
   }, [query, qs, data]);
 
   useEffect(() => {
-    document.title = `${approx(result.final.value)} ${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${shortCity(result.market.name)} · The Denominator`;
+    document.title = `${approx(result.final.value)} ${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${shortCity(result.market.name)} · Fish in the Sea`;
   }, [result, query.seek]);
 
   // Replay the sieve only when the funnel itself changes, not when you edit
@@ -155,7 +158,7 @@ export default function App({
   return (
     <main className="mx-auto max-w-3xl px-4 pb-24 pt-10 sm:px-6 sm:pt-16">
       <header className="mb-10">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">The Denominator</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Fish in the Sea</p>
         <h1 className="mt-3 font-display text-4xl leading-[1.05] tracking-tight sm:text-5xl">
           How many people could you actually date?
         </h1>

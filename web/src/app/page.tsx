@@ -42,7 +42,7 @@ async function resolve(props: Props) {
 
 export async function generateMetadata(props: Props): Promise<Metadata> {
   const { query, result } = await resolve(props);
-  const title = `${approx(result.final.value)} ${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${shortCity(result.market.name)} · The Denominator`;
+  const title = `${approx(result.final.value)} ${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${shortCity(result.market.name)} · Fish in the Sea`;
   const image = `/api/og?${serializeQuery(query)}`;
   return {
     title,

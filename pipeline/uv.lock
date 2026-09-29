@@ -50,7 +50,7 @@ wheels = [
 ]
 
 [[package]]
-name = "matchmaker-pipeline"
+name = "fish-in-the-sea-pipeline"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

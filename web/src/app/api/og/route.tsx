@@ -21,7 +21,7 @@ export async function GET(req: Request) {
     (
       <div style={{ width: "100%", height: "100%", display: "flex", background: PAPER, color: INK, padding: 64, fontFamily: "sans-serif" }}>
         <div style={{ display: "flex", flexDirection: "column", width: 620 }}>
-          <div style={{ fontSize: 22, letterSpacing: 6, color: MUTED }}>THE DENOMINATOR</div>
+          <div style={{ fontSize: 22, letterSpacing: 6, color: MUTED }}>FISH IN THE SEA</div>
           <div style={{ fontSize: 150, fontWeight: 700, lineHeight: 1, marginTop: 40, color: ACCENT }}>
             {fmt(r.final.value)}
           </div>

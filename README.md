@@ -1,4 +1,4 @@
-# The Denominator
+# Fish in the Sea
 
 How many people could you actually date? Pick a US metro, your age and sex, and who you're looking for; the site sifts the population one step at a time using Census data and a few survey-based rates, adjusts for competition, and compares metros.
 
