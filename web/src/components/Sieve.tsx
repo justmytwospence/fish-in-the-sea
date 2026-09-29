@@ -14,7 +14,11 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
   const engine = useRef<SieveEngine | null>(null);
   const p = useMemo(() => plan(steps), [steps]);
   const last = steps.length - 1;
-  const [cur, setCur] = useState(0);
+  // The sieve opens on the second step (everyone, with the sex you're after
+  // lit), since "everyone" alone would be one undivided block. The total
+  // population is still the field and still listed in the steps below.
+  const first = Math.min(1, last);
+  const [cur, setCur] = useState(first);
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const planRef = useRef(p);
@@ -27,7 +31,8 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
     e.readColors();
     // Start still on step one (everyone, all in color).
     // Nothing moves until you step or press play.
-    e.set(planRef.current.field[0], planRef.current.keep[0]);
+    const start = Math.min(1, planRef.current.field.length - 1);
+    e.set(planRef.current.field[start], planRef.current.keep[start]);
     const ro = new ResizeObserver(([entry]) => {
       const w = entry.contentRect.width;
       const h = Math.round(Math.min(460, Math.max(300, w * (w < 640 ? 0.95 : 0.56))));
@@ -80,7 +85,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
   const back = useCallback(
     (from: number) => {
       const e = engine.current;
-      if (!e || from <= 0) return;
+      if (!e || from <= first) return;
       const prev = from - 1;
       // Everyone this step had becomes a keeper again and the people the
       // previous step dropped rise back in.
@@ -88,20 +93,20 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       setCur(prev);
       e.restore(p.field[prev], p.keep[prev], () => setBusy(false));
     },
-    [p],
+    [p, first],
   );
 
   // Manual navigation pauses autoplay. Adjacent steps animate; mid-animation
   // or longer hops jump straight there.
   const goTo = useCallback(
     (i: number) => {
-      const target = Math.max(0, Math.min(last, i));
+      const target = Math.max(first, Math.min(last, i));
       setPlaying(false);
       if (!busy && target === cur + 1) forward(cur);
       else if (!busy && target === cur - 1) back(cur);
       else if (target !== cur || busy) jump(target);
     },
-    [busy, cur, last, forward, back, jump],
+    [busy, cur, first, last, forward, back, jump],
   );
 
   // Arrow keys step through the sieve while it's on screen.
@@ -125,9 +130,9 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
   // Autoplay: advance after a pause on each step.
   useEffect(() => {
     if (!playing || busy || cur >= last) return;
-    const timer = setTimeout(() => forward(cur), cur === 0 ? 400 : DWELL_MS);
+    const timer = setTimeout(() => forward(cur), cur === first ? 400 : DWELL_MS);
     return () => clearTimeout(timer);
-  }, [playing, busy, cur, last, forward]);
+  }, [playing, busy, cur, first, last, forward]);
 
   const s = steps[cur];
   const prev = cur > 0 ? steps[cur - 1] : null;
@@ -142,7 +147,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
         <div className="flex items-start justify-between gap-4 px-4 pt-4 sm:px-5">
           <div aria-live="polite">
             <p className="text-sm text-muted">
-              Step {cur + 1} of {steps.length}
+              Step {cur - first + 1} of {steps.length - first}
               {thin && s.kind === "microdata" && (
                 <span
                   title="Few survey records behind this step here, so the estimate leans on regional rates. Treat it as rough."
@@ -193,7 +198,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
             type="button"
             onClick={() => {
               if (cur >= last) {
-                jump(0);
+                jump(first);
                 setPlaying(true);
               } else setPlaying(!playing);
             }}
@@ -205,7 +210,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
             <button
               type="button"
               onClick={() => goTo(cur - 1)}
-              disabled={cur === 0}
+              disabled={cur <= first}
               aria-label="Previous step"
               className="px-3 py-1.5 hover:bg-rule/40 disabled:opacity-40"
             >
@@ -225,20 +230,23 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
             Skip to the end
           </button>
           <ol className="ml-auto flex max-w-full gap-1 overflow-x-auto py-1" aria-label="Steps">
-            {steps.map((st, i) => (
-              <li key={st.key}>
-                <button
-                  type="button"
-                  title={st.label}
-                  aria-label={`Go to step ${i + 1}: ${st.label}`}
-                  aria-current={i === cur ? "step" : undefined}
-                  onClick={() => goTo(i)}
-                  className={`block h-3 w-3 rounded-full transition-colors hover:ring-2 hover:ring-accent-soft ${
-                    i === cur ? "bg-accent" : i < cur ? "bg-muted" : "bg-rule"
-                  }`}
-                />
-              </li>
-            ))}
+            {steps.slice(first).map((st, k) => {
+              const i = k + first;
+              return (
+                <li key={st.key}>
+                  <button
+                    type="button"
+                    title={st.label}
+                    aria-label={`Go to step ${k + 1}: ${st.label}`}
+                    aria-current={i === cur ? "step" : undefined}
+                    onClick={() => goTo(i)}
+                    className={`block h-3 w-3 rounded-full transition-colors hover:ring-2 hover:ring-accent-soft ${
+                      i === cur ? "bg-accent" : i < cur ? "bg-muted" : "bg-rule"
+                    }`}
+                  />
+                </li>
+              );
+            })}
           </ol>
         </div>
       </div>
