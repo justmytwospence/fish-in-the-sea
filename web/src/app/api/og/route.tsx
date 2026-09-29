@@ -29,7 +29,7 @@ export async function GET(req: Request) {
             {`${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${city} who might date a ${query.me.age}-year-old ${noun(query.me.sex, false)}.`}
           </div>
           <div style={{ fontSize: 26, marginTop: "auto", color: MUTED }}>
-            {`Fair share after competition: ${(r.competition?.fairShare ?? 0).toFixed(2)} · Census ACS 2020–24`}
+            {`≈${fmt(r.competition?.adjusted ?? 0)} after competition · Census ACS 2020–24`}
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", marginLeft: 48, flex: 1, gap: 14 }}>

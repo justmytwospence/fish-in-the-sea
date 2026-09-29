@@ -60,8 +60,10 @@ export default function Method({ dataYear }: { dataYear: string }) {
         <p>
           <strong>Competition</strong> is a revealed-preference choice model fitted to couples formed in the last one to
           three years (age, education, income and marriage history), plus published estimates for kids and height. It
-          weights every available competitor by how well they match what your targets go for, and your fair share is
-          how many of your targets would pick you if everyone chose in proportion to that appeal. Details are in the
+          scores every available competitor by how well they match what your targets go for. Your competition-adjusted
+          pool is your pool divided by the number of serious competitors per person in it (counting competitors by
+          appeal, so long shots count for little), times your appeal relative to a typical serious competitor. With
+          one serious competitor per person and you exactly typical, it equals the raw pool. Details are in the
           competition section.
         </p>
         <p>

@@ -49,6 +49,12 @@ export interface Competition {
   steps: CompStep[]; // their sieve, in ideal-equivalent competitors
   targets: number;
   perTarget: number; // ideal-equivalent competitors each target weighs
+  // Competition-adjusted pool = pool / ratio * relative.
+  inRunning: number; // competitors in the running, in "typical serious competitor" units
+  ratio: number; // competitors in the running per person in your pool
+  relative: number; // your appeal to your pool / a typical serious competitor's
+  multiplier: number; // relative / ratio: 1 in a balanced market where you're typical
+  adjusted: number; // your pool, adjusted for competition
   score: number; // you, as a fraction of their ideal
   percentile: number; // share of the competition (weighted by appeal) you out-rank on paper
   fairShare: number; // expected number of targets who'd pick you
@@ -302,21 +308,30 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
       for (let x = 0; x < NTYPE; x++) s += targets.m[i * NTYPE + x] * Pall[x * NTYPE + y];
       H[i * NTYPE + y] = s / Ntot;
     }
-  // Rank among the competition that matters: each competitor counts in
-  // proportion to their own appeal, so 22-year-olds chasing 35-year-olds
-  // don't pad your percentile.
+  // Each competitor's appeal s to your pool (same scale as your score).
+  // Competitors "in the running" are counted in units of a typical serious
+  // competitor: total appeal divided by the appeal-weighted average appeal,
+  // i.e. (sum m*s)^2 / sum m*s^2. A thousand long shots count for far less
+  // than a hundred strong contenders. Your percentile is also appeal-weighted,
+  // so 22-year-olds chasing 35-year-olds don't pad it.
   let below = 0;
-  let inRunning = 0;
-  if (detail)
-    for (let j = 0; j < nAy; j++)
-      for (let y = 0; y < NTYPE; y++) {
-        const m = comps.m[j * NTYPE + y];
-        if (m <= 0) continue;
-        let s = 0;
-        for (let i = 0; i < nAx; i++) s += A[i * nAy + j] * compH[i] * H[i * NTYPE + y];
-        inRunning += m * s;
-        if (s < score) below += m * s;
-      }
+  let sumW = 0;
+  let sumW2 = 0;
+  for (let j = 0; j < nAy; j++)
+    for (let y = 0; y < NTYPE; y++) {
+      const m = comps.m[j * NTYPE + y];
+      if (m <= 0) continue;
+      let s = 0;
+      for (let i = 0; i < nAx; i++) s += A[i * nAy + j] * compH[i] * H[i * NTYPE + y];
+      sumW += m * s;
+      sumW2 += m * s * s;
+      if (s < score) below += m * s;
+    }
+  const typical = sumW > 0 ? sumW2 / sumW : 0;
+  const inRunning = sumW2 > 0 ? (sumW * sumW) / sumW2 : 0;
+  const ratio = inRunning / Ntot;
+  const relative = typical > 0 ? score / typical : 0;
+  const multiplier = ratio > 0 ? relative / ratio : 0;
 
   // Education is mostly about matching: appeal of each candidate level for
   // targets at each level, plus how common each target level is.
@@ -353,7 +368,12 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
     targets: Ntot,
     perTarget: last.E,
     score,
-    percentile: inRunning > 0 ? below / inRunning : 0,
+    percentile: sumW > 0 ? below / sumW : 0,
+    inRunning,
+    ratio,
+    relative,
+    multiplier,
+    adjusted: Ntot * multiplier,
     fairShare,
     prefs: {
       ages,

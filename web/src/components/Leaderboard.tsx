@@ -6,32 +6,42 @@ import { noun, type Query } from "@/lib/model";
 import { fmt } from "@/lib/format";
 import MetroChart from "./MetroChart";
 
-const MODES: { key: Sort; label: string; blurb: string; by: string }[] = [
+const MODES: { key: Sort; label: string; by: string; blurb: string }[] = [
   {
     key: "raw",
-    label: "Raw numbers",
-    by: "pool size",
-    blurb: "Most people who make it through your sieve. Big metros win, obviously.",
+    label: "Raw pool",
+    by: "raw pool",
+    blurb: "Most people through your sieve, ignoring competition. Big metros win, obviously.",
   },
   {
-    key: "fair",
-    label: "After competition",
-    by: "fair share",
+    key: "adjusted",
+    label: "Adjusted pool",
+    by: "adjusted pool",
+    blurb: "Your pool after adjusting for competition: the number to compare if you're weighing a move.",
+  },
+  {
+    key: "odds",
+    label: "Best odds",
+    by: "odds",
     blurb:
-      "Your fair share: how many of them would pick you, given everyone else in the running and what they go for. Size mostly cancels out, so this is about the balance of the market.",
+      "The adjustment alone (adjusted ÷ raw): where the competition for your pool is lightest, regardless of size.",
   },
 ];
 
-const metric = (sort: Sort, r: RankRow) => (sort === "raw" ? fmt(r.value) : (r.fairShare ?? 0).toFixed(2));
+function metric(sort: Sort, r: RankRow) {
+  if (sort === "raw") return fmt(r.value);
+  if (sort === "adjusted") return fmt(r.adjusted);
+  return `×${(r.multiplier ?? 0).toFixed(2)}`;
+}
 
 export default function Leaderboard({ qs, query, onPick }: { qs: string; query: Query; onPick: (id: string) => void }) {
   const [data, setData] = useState<RankResponse | null>(null);
-  const [sort, setSort] = useState<Sort>("fair");
+  const [sort, setSort] = useState<Sort>("adjusted");
 
   useEffect(() => {
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      fetch(`/api/rank?v=4&${qs}`, { signal: ctrl.signal })
+      fetch(`/api/rank?v=5&${qs}`, { signal: ctrl.signal })
         .then((r) => r.json())
         .then(setData)
         .catch(() => {});
@@ -43,17 +53,23 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
   }, [qs]);
 
   const mode = MODES.find((m) => m.key === sort)!;
+
   // Top 5, then your metro with five neighbors on either side (merged when
   // they overlap).
   const TOP = 5;
   const list: ({ rank: number; row: RankRow } | "gap")[] = [];
-  if (data) {
-    const top = (data.top[sort] ?? []).slice(0, TOP).map((row, i) => ({ rank: i + 1, row }));
+  if (data?.top?.[sort]) {
+    const top = data.top[sort].slice(0, TOP).map((row, i) => ({ rank: i + 1, row }));
     const around = (data.around?.[sort] ?? []).filter((x) => x.rank > TOP);
     list.push(...top);
     if (around.length && around[0].rank > TOP + 1) list.push("gap");
     list.push(...around);
   }
+
+  const pick = (id: string) => {
+    onPick(id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   return (
     <section aria-label="Other cities" className="mt-16 border-t border-rule pt-10">
@@ -67,7 +83,7 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
             role="radio"
             aria-checked={m.key === sort}
             onClick={() => setSort(m.key)}
-            className={`rounded-full px-4 py-1.5 text-sm transition-colors ${
+            className={`rounded-full px-3 py-1.5 text-sm transition-colors sm:px-4 ${
               m.key === sort ? "bg-ink text-paper" : "text-muted hover:text-ink"
             }`}
           >
@@ -76,76 +92,65 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
         ))}
       </div>
       <p className="mt-3 max-w-xl text-sm text-muted">{mode.blurb}</p>
-      {data?.you && (
+      {data?.you?.rank && (
         <p className="mt-3">
-          Your metro ranks <strong>#{data.you.rank[sort]}</strong> of {data.total} by {mode.by}
-          {sort === "fair" ? (
-            <> ({(data.you.fairShare ?? 0).toFixed(2)}; by raw numbers it&apos;s #{data.you.rank.raw}).</>
-          ) : (
-            <> ({fmt(data.you.value)}; after competition it&apos;s #{data.you.rank.fair}).</>
-          )}
+          Your metro ranks <strong>#{data.you.rank[sort]}</strong> of {data.total} by {mode.by} (raw #{data.you.rank.raw},
+          adjusted #{data.you.rank.adjusted}, odds #{data.you.rank.odds}).
         </p>
       )}
 
       {data?.all?.length ? (
-        <MetroChart
-          data={data}
-          sort={sort}
-          current={query.market}
-          onPick={(id) => {
-            onPick(id);
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }}
-        />
+        <MetroChart data={data} sort={sort} current={query.market} onPick={pick} />
       ) : (
         <div className="mt-6 h-[300px] rounded-lg bg-rule/20" />
       )}
-      <p className="mt-2 text-xs text-muted">
-        Each dot is a metro. Right means more people make it through your sieve; up means less competition for
-        them. Highlighted: you, the five metros ranked on either side of you, and the top five by {mode.by}. Click a
-        dot to go there.
+      <p className="mt-2 max-w-xl text-xs text-muted">
+        Each dot is a metro. Across: your raw pool. Up: the competition multiplier (above ×1, less competition
+        than a balanced market; below, more). Adjusted pool is the two multiplied, so dots on the same dashed curve
+        have the same adjusted pool. Highlighted: you, the five metros ranked on either side of you and the top five
+        by {mode.by}. Click a dot to go there.
       </p>
 
-      <ol className={`mt-4 divide-y divide-rule transition-opacity ${data ? "" : "opacity-40"}`}>
+      <ol className={`mt-6 divide-y divide-rule transition-opacity ${data ? "" : "opacity-40"}`}>
         {(list.length ? list : Array.from({ length: 10 }, () => null)).map((item, i) => {
           if (item === "gap")
             return (
-              <li key="gap" aria-hidden className="py-1 pl-9 text-muted">
+              <li key="gap" aria-hidden className="py-1 pl-11 text-muted">
                 ⋯
               </li>
             );
           const r = item?.row ?? null;
           const mine = r?.id === query.market;
           return (
-          <li key={r?.id ?? i} className={`flex items-baseline justify-between gap-3 py-2 ${mine ? "-mx-2 rounded bg-accent-soft/60 px-2" : ""}`}>
-            <span className="flex items-baseline gap-3">
-              <span className="w-8 text-right text-sm tabular-nums text-muted">{item?.rank ?? ""}</span>
-              {r ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onPick(r.id);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                  className={`text-left hover:underline ${r.id === query.market ? "font-semibold text-accent" : ""}`}
-                >
-                  {r.name}
-                </button>
-              ) : (
-                <span className="h-4 w-48 rounded bg-rule/50" />
-              )}
-            </span>
-            <span className="shrink-0 text-right tabular-nums">
-              {r ? metric(sort, r) : ""}
-              {r && sort === "fair" && <span className="ml-2 text-xs text-muted">{fmt(r.value)} in pool</span>}
-            </span>
-          </li>
+            <li
+              key={r?.id ?? i}
+              className={`flex items-baseline justify-between gap-3 py-2 ${mine ? "-mx-2 rounded bg-accent-soft/60 px-2" : ""}`}
+            >
+              <span className="flex items-baseline gap-3">
+                <span className="w-8 text-right text-sm tabular-nums text-muted">{item?.rank ?? ""}</span>
+                {r ? (
+                  <button
+                    type="button"
+                    onClick={() => pick(r.id)}
+                    className={`text-left hover:underline ${mine ? "font-semibold text-accent" : ""}`}
+                  >
+                    {r.name}
+                  </button>
+                ) : (
+                  <span className="h-4 w-48 rounded bg-rule/50" />
+                )}
+              </span>
+              <span className="shrink-0 text-right tabular-nums">
+                {r ? metric(sort, r) : ""}
+                {r && sort !== "raw" && <span className="ml-2 text-xs text-muted">of {fmt(r.value)}</span>}
+              </span>
+            </li>
           );
         })}
       </ol>
       <p className="mt-3 text-xs text-muted">
-        Metro areas only, same search ({noun(query.seek.sex)} {query.seek.lo}–{query.seek.hi}, same filters, same you).
-        Fair share skips metros with fewer than 50 people in your pool.
+        Metro areas only, same search ({noun(query.seek.sex)} {query.seek.lo}–{query.seek.hi}, same filters, same
+        you). Odds skip metros with fewer than 50 people in your pool.
       </p>
     </section>
   );

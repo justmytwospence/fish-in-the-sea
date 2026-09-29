@@ -3,7 +3,7 @@
 import { SOURCES } from "@/lib/assumptions";
 import { incomeWeights, type You } from "@/lib/competition";
 import { noun, type Query, type Result } from "@/lib/model";
-import { fmt, pct } from "@/lib/format";
+import { approx, fmt, pct } from "@/lib/format";
 
 const EDU = ["No degree", "Bachelor's", "Graduate"];
 const INC = ["Under $25k", "$25–60k", "$60–120k", "$120k+"];
@@ -181,64 +181,87 @@ export default function Competition({
   const us = noun(query.me.sex);
   const you = query.you;
   const set = (patch: Partial<You>) => onYou({ ...you, ...patch });
-  const fs = c.fairShare;
+  const one = noun(query.seek.sex, false);
+  const mult = c.multiplier;
 
   let verdict: string;
-  if (fs < 0.3) verdict = "On paper, you're a long shot.";
-  else if (fs < 0.8) verdict = "You're in the running. Barely.";
-  else if (fs < 1.5) verdict = "Roughly a fair share.";
-  else verdict = "The market is tilted your way.";
+  if (mult < 0.5) verdict = "On paper, you're a long shot.";
+  else if (mult < 0.9) verdict = "You're outnumbered.";
+  else if (mult <= 1.1) verdict = "About a fair fight.";
+  else verdict = "The market tilts your way.";
 
   const heights = Array.from({ length: 31 }, (_, i) => 56 + i);
   const oppositeSex = query.me.sex !== query.seek.sex;
+  const x2 = (v: number) => (v >= 10 ? fmt(v) : v.toFixed(2));
 
   return (
     <section aria-label="Competition" className="mt-16 border-t border-rule pt-10">
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">The competition</p>
       <h2 className="mt-3 font-display text-3xl tracking-tight">{verdict}</h2>
       <p className="mt-3 max-w-xl text-muted">
-        You&apos;re not the only one sifting. Here&apos;s what {them} like the ones in your pool actually go for, who
-        else is in the running, and where you land.
+        A headcount pretends you&apos;re the only one looking. You&apos;re not. Here&apos;s your pool again, adjusted
+        for how many other {us} are after the same {them} and how you stack up against them.
       </p>
 
-      <div className="mt-8 grid gap-6 sm:grid-cols-[1fr_1.1fr]">
-        <div className="rounded-xl border border-rule bg-card p-5">
-          <p className="text-xs uppercase tracking-widest text-muted">Your fair share</p>
-          <p className="mt-1 font-display text-6xl tracking-tight">{fs >= 10 ? fmt(fs) : fs.toFixed(2)}</p>
-          <p className="mt-2 text-sm text-muted">
-            If each of the {fmt(c.targets)} {them} in your pool picked one of the {us} in the running, with odds in
-            proportion to what {them} like them go for, this is how many would pick you.
-          </p>
-          <dl className="mt-5 grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <dt className="text-muted">You, on their scale</dt>
-              <dd className="font-display text-2xl">{Math.round(c.score * 100)}/100</dd>
-            </div>
-            <div>
-              <dt className="text-muted">You out-rank</dt>
-              <dd className="font-display text-2xl">{pct(c.percentile)}</dd>
-              <dd className="text-xs text-muted">of the competition that matters</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div>
-          <p className="text-sm font-medium">About you</p>
-          <p className="text-xs text-muted">Leave anything on &ldquo;Typical&rdquo; to use the typical single {noun(query.me.sex, false)} your age.</p>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <YouSelect label="Education" value={you.edu} options={EDU.map((l, v) => ({ v, label: l }))} onChange={(edu) => set({ edu })} />
-            <IncomeSlider value={you.income} onChange={(income) => set({ income })} />
-            <YouSelect label="Kids at home" value={you.kids} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(kids) => set({ kids })} />
-            <YouSelect label="Been married" value={you.prev} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(prev) => set({ prev })} />
-            {oppositeSex && (
-              <YouSelect
-                label="Height"
-                value={you.height}
-                options={heights.map((h) => ({ v: h, label: inches(h) }))}
-                onChange={(height) => set({ height })}
-              />
-            )}
+      <div className="mt-8 rounded-xl border border-rule bg-card p-5">
+        <p className="text-xs uppercase tracking-widest text-muted">Your pool, adjusted for competition</p>
+        <p className="mt-1 font-display text-6xl tracking-tight">≈{approx(c.adjusted)}</p>
+        <p className="mt-1 text-sm text-muted">
+          {them}, or ×{mult.toFixed(2)} your headcount of {fmt(c.targets)}
+        </p>
+        <div className="mt-6 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-start gap-x-2 gap-y-1 text-center sm:gap-x-4">
+          <div>
+            <p className="font-display text-2xl tabular-nums sm:text-3xl">{fmt(c.targets)}</p>
+            <p className="text-xs text-muted">{them} in your pool</p>
           </div>
+          <p className="pt-1 font-display text-2xl text-muted">÷</p>
+          <div>
+            <p className="font-display text-2xl tabular-nums sm:text-3xl">{x2(c.ratio)}</p>
+            <p className="text-xs text-muted">
+              {us} in the running per {one}
+            </p>
+          </div>
+          <p className="pt-1 font-display text-2xl text-muted">×</p>
+          <div>
+            <p className="font-display text-2xl tabular-nums sm:text-3xl">{x2(c.relative)}</p>
+            <p className="text-xs text-muted">you vs. a typical one of them</p>
+          </div>
+        </div>
+        <div className="mt-6 grid gap-3 text-sm text-muted sm:grid-cols-3">
+          <p>
+            <strong className="text-ink">In the running:</strong> about {fmt(c.inRunning)} {us} are single, looking and
+            into {them}, counted by how much {them} like yours go for them. A thousand long shots count for less than
+            a hundred strong contenders.
+          </p>
+          <p>
+            <strong className="text-ink">You vs. them:</strong> your appeal to your pool, relative to a typical serious
+            competitor, from what {them} like yours actually go for (below). You out-rank {pct(c.percentile)} of the
+            competition that matters.
+          </p>
+          <p>
+            <strong className="text-ink">The benchmark:</strong> with exactly one serious competitor per {one} and you
+            exactly typical, the adjusted pool equals the headcount. More competition shrinks it; being a better match
+            than the typical competitor grows it back.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <p className="text-sm font-medium">About you</p>
+        <p className="text-xs text-muted">Leave anything on &ldquo;Typical&rdquo; to use the typical single {noun(query.me.sex, false)} your age.</p>
+        <div className="mt-3 grid max-w-xl grid-cols-2 gap-3">
+          <YouSelect label="Education" value={you.edu} options={EDU.map((l, v) => ({ v, label: l }))} onChange={(edu) => set({ edu })} />
+          <IncomeSlider value={you.income} onChange={(income) => set({ income })} />
+          <YouSelect label="Kids at home" value={you.kids} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(kids) => set({ kids })} />
+          <YouSelect label="Been married" value={you.prev} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(prev) => set({ prev })} />
+          {oppositeSex && (
+            <YouSelect
+              label="Height"
+              value={you.height}
+              options={heights.map((h) => ({ v: h, label: inches(h) }))}
+              onChange={(height) => set({ height })}
+            />
+          )}
         </div>
       </div>
 
@@ -296,25 +319,6 @@ export default function Competition({
         <Scale title="Kids at home" levels={["No kids", "Has kids"]} values={c.prefs.kids} you={you.kids} />
         <Scale title="Marriage history" levels={["Never married", "Been married"]} values={c.prefs.prev} you={you.prev} />
       </div>
-
-      <h3 className="mt-12 font-display text-2xl tracking-tight">Their sieve</h3>
-      <p className="mt-2 max-w-xl text-sm text-muted">
-        The same exercise from their side: {us} who are single, looking and into {them}, weighted by how well each
-        matches what {them} like them go for. Units are &ldquo;ideal-equivalents&rdquo;: two people at half-appeal
-        count as one ideal.
-      </p>
-      <ol className="mt-4 max-w-xl divide-y divide-rule/60 text-sm">
-        {c.steps.map((s) => (
-          <li key={s.key} className="flex justify-between py-2">
-            <span>{s.label}</span>
-            <span className="tabular-nums">{fmt(s.value)}</span>
-          </li>
-        ))}
-      </ol>
-      <p className="mt-3 max-w-xl text-sm">
-        So each {noun(query.seek.sex, false)} in your pool is weighing roughly{" "}
-        <strong>{fmt(c.perTarget)}</strong> ideal-equivalent {us}. You count as {Math.round(c.score * 100)}/100 of one.
-      </p>
 
       <details className="mt-6 max-w-xl text-sm text-muted">
         <summary className="cursor-pointer select-none hover:text-ink">How the competition model works</summary>
