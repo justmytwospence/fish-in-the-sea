@@ -231,6 +231,23 @@ export class SieveEngine {
     } else drop();
   }
 
+  // Step backward: the people this step removed rise back up from below. When
+  // the previous step used a coarser unit, first merge down to `collapseTo`
+  // dots at that unit.
+  restore(count: number, collapseTo: number | null, onDone: () => void) {
+    this.cancel();
+    this.fallers = [];
+    if (collapseTo !== null) this.dots = this.dots.slice(0, Math.max(0, collapseTo));
+    for (let i = this.dots.length; i < count; i++) {
+      const x = this.rand() * this.w;
+      const y = this.h + 10 + this.rand() * this.h * 0.6;
+      this.dots.push({ x, y, fx: x, fy: y, tx: x, ty: y });
+    }
+    this.relayout(true);
+    this.anim = { start: performance.now(), phase: "move", done: onDone };
+    if (!this.raf) this.raf = requestAnimationFrame(this.loop);
+  }
+
   private loop = () => {
     this.raf = 0;
     const now = performance.now();

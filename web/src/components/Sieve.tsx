@@ -74,32 +74,84 @@ export default function Sieve({ steps }: { steps: Step[] }) {
     [p, last],
   );
 
-  // Advance one step at a time while playing. The label switches to the new
+  // One animated step forward from `from`. The label switches to the new
   // step as its dots start falling.
+  const forward = useCallback(
+    (from: number) => {
+      const e = engine.current;
+      if (!e || from >= last) return;
+      const next = from + 1;
+      const zoomTo = p.zoomAt[next] ? Math.round(steps[from].value / p.units[next]) : null;
+      setZoomed(zoomTo !== null ? p.units[from] / p.units[next] : null);
+      setBusy(true);
+      setCur(next);
+      e.highlight = false;
+      e.transition(p.counts[next], zoomTo, () => {
+        setBusy(false);
+        setZoomed(null);
+        if (next >= last) {
+          setPlaying(false);
+          e.highlight = true;
+          e.draw();
+        }
+      });
+    },
+    [p, last, steps],
+  );
+
+  // One animated step back: the people removed rise back into the field.
+  const back = useCallback(
+    (from: number) => {
+      const e = engine.current;
+      if (!e || from <= 0) return;
+      const prev = from - 1;
+      const collapseTo = p.units[prev] !== p.units[from] ? Math.round(steps[from].value / p.units[prev]) : null;
+      setZoomed(null);
+      setBusy(true);
+      setCur(prev);
+      e.highlight = false;
+      e.restore(p.counts[prev], collapseTo, () => setBusy(false));
+    },
+    [p, steps],
+  );
+
+  // Manual navigation pauses autoplay. Adjacent steps animate; mid-animation
+  // or longer hops jump straight there.
+  const goTo = useCallback(
+    (i: number) => {
+      const target = Math.max(0, Math.min(last, i));
+      setPlaying(false);
+      if (!busy && target === cur + 1) forward(cur);
+      else if (!busy && target === cur - 1) back(cur);
+      else if (target !== cur || busy) jump(target);
+    },
+    [busy, cur, last, forward, back, jump],
+  );
+
+  // Arrow keys step through the sieve while it's on screen.
   useEffect(() => {
-    const e = engine.current;
-    if (!playing || busy || !e || cur >= last) return;
-    const next = cur + 1;
-    const timer = setTimeout(
-      () => {
-        const zoomTo = p.zoomAt[next] ? Math.round(steps[cur].value / p.units[next]) : null;
-        setZoomed(zoomTo !== null ? p.units[cur] / p.units[next] : null);
-        setBusy(true);
-        setCur(next);
-        e.transition(p.counts[next], zoomTo, () => {
-          setBusy(false);
-          setZoomed(null);
-          if (next >= last) {
-            setPlaying(false);
-            e.highlight = true;
-            e.draw();
-          }
-        });
-      },
-      cur === 0 ? 400 : DWELL_MS,
-    );
+    const wrap = wrapRef.current!;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const tag = (ev.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      const r = wrap.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) return;
+      if (ev.key === "ArrowRight") goTo(cur + 1);
+      else if (ev.key === "ArrowLeft") goTo(cur - 1);
+      else return;
+      ev.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cur, goTo]);
+
+  // Autoplay: advance after a pause on each step.
+  useEffect(() => {
+    if (!playing || busy || cur >= last) return;
+    const timer = setTimeout(() => forward(cur), cur === 0 ? 400 : DWELL_MS);
     return () => clearTimeout(timer);
-  }, [playing, busy, cur, last, p, steps]);
+  }, [playing, busy, cur, last, forward]);
 
   const s = steps[cur];
   const prev = cur > 0 ? steps[cur - 1] : null;
@@ -151,7 +203,27 @@ export default function Sieve({ steps }: { steps: Step[] }) {
           >
             {playing ? "Pause" : cur >= last ? "Replay" : cur === 0 ? "Start sifting" : "Resume"}
           </button>
-          <button type="button" onClick={() => jump(last)} className="rounded-full border border-rule px-3 py-1.5 text-sm hover:border-muted">
+          <div className="flex overflow-hidden rounded-full border border-rule text-sm">
+            <button
+              type="button"
+              onClick={() => goTo(cur - 1)}
+              disabled={cur === 0}
+              aria-label="Previous step"
+              className="px-3 py-1.5 hover:bg-rule/40 disabled:opacity-40"
+            >
+              ← Back
+            </button>
+            <button
+              type="button"
+              onClick={() => goTo(cur + 1)}
+              disabled={cur >= last}
+              aria-label="Next step"
+              className="border-l border-rule px-3 py-1.5 hover:bg-rule/40 disabled:opacity-40"
+            >
+              Next →
+            </button>
+          </div>
+          <button type="button" onClick={() => goTo(last)} className="rounded-full border border-rule px-3 py-1.5 text-sm hover:border-muted">
             Skip to the end
           </button>
           <ol className="ml-auto flex max-w-full gap-1 overflow-x-auto py-1" aria-label="Steps">
@@ -162,8 +234,8 @@ export default function Sieve({ steps }: { steps: Step[] }) {
                   title={st.label}
                   aria-label={`Go to step ${i + 1}: ${st.label}`}
                   aria-current={i === cur ? "step" : undefined}
-                  onClick={() => jump(i)}
-                  className={`block h-2.5 w-2.5 rounded-full transition-colors ${
+                  onClick={() => goTo(i)}
+                  className={`block h-3 w-3 rounded-full transition-colors hover:ring-2 hover:ring-accent-soft ${
                     i === cur ? "bg-accent" : i < cur ? "bg-muted" : "bg-rule"
                   }`}
                 />
