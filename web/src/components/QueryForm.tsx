@@ -278,21 +278,19 @@ export default function QueryForm({
         />
       </SliderRow>
       {query.you.height !== undefined && (
-        <div className="mt-1 flex flex-wrap gap-2 text-xs sm:pl-[10.75rem]">
-          <button
-            type="button"
+        <div className="mt-2 flex flex-wrap gap-2 sm:pl-[10.75rem]">
+          <Chip
+            on={hr?.lo === HEIGHT_MIN && hr.hi === query.you.height}
             onClick={() => set({ filters: { ...f, height: { lo: HEIGHT_MIN, hi: query.you.height! } } })}
-            className="text-muted underline hover:text-ink"
           >
             no taller than me
-          </button>
-          <button
-            type="button"
+          </Chip>
+          <Chip
+            on={hr?.hi === HEIGHT_MAX && hr.lo === query.you.height}
             onClick={() => set({ filters: { ...f, height: { lo: query.you.height!, hi: HEIGHT_MAX } } })}
-            className="text-muted underline hover:text-ink"
           >
             at least as tall as me
-          </button>
+          </Chip>
         </div>
       )}
 
