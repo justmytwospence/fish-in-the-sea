@@ -18,6 +18,8 @@ export interface RankResponse {
   top: Record<Sort, RankRow[]>;
   // Your metro and the NEIGHBORS on either side of it, with ranks.
   around: Record<Sort, { rank: number; row: RankRow }[]>;
+  // Every metro, for the chart: [id, name, pool, fair share, raw rank, fair rank]
+  all: [string, string, number, number, number, number][];
 }
 
 const NEIGHBORS = 5;
@@ -64,6 +66,14 @@ export async function GET(req: Request) {
       : null,
     top: { raw: sorted.raw.slice(0, 10), fair: sorted.fair.slice(0, 10) },
     around: { raw: neighbors(sorted.raw, mine), fair: neighbors(sorted.fair, mine) },
+    all: rows.map((r) => [
+      r.id,
+      r.name,
+      Math.round(r.value * 10) / 10,
+      Math.round(r.fairShare * 1000) / 1000,
+      sorted.raw.indexOf(r) + 1,
+      sorted.fair.indexOf(r) + 1,
+    ]),
   };
   return Response.json(body, {
     headers: { "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800" },

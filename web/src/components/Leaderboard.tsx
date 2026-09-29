@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { RankResponse, RankRow, Sort } from "@/app/api/rank/route";
 import { noun, type Query } from "@/lib/model";
 import { fmt } from "@/lib/format";
+import MetroChart from "./MetroChart";
 
 const MODES: { key: Sort; label: string; blurb: string; by: string }[] = [
   {
@@ -30,7 +31,7 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
   useEffect(() => {
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      fetch(`/api/rank?v=3&${qs}`, { signal: ctrl.signal })
+      fetch(`/api/rank?v=4&${qs}`, { signal: ctrl.signal })
         .then((r) => r.json())
         .then(setData)
         .catch(() => {});
@@ -85,6 +86,25 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
           )}
         </p>
       )}
+
+      {data?.all?.length ? (
+        <MetroChart
+          data={data}
+          sort={sort}
+          current={query.market}
+          onPick={(id) => {
+            onPick(id);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        />
+      ) : (
+        <div className="mt-6 h-[300px] rounded-lg bg-rule/20" />
+      )}
+      <p className="mt-2 text-xs text-muted">
+        Each dot is a metro. Right means more people make it through your sieve; up means less competition for
+        them. Highlighted: you, the five metros ranked on either side of you, and the top five by {mode.by}. Click a
+        dot to go there.
+      </p>
 
       <ol className={`mt-4 divide-y divide-rule transition-opacity ${data ? "" : "opacity-40"}`}>
         {(list.length ? list : Array.from({ length: 10 }, () => null)).map((item, i) => {
