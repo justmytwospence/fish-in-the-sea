@@ -3,24 +3,23 @@
 // the ones this step keeps ("keepers") sit together at the top in the accent
 // color, so the step's proportion is visible at a glance. Stepping forward
 // drops the non-keepers through the bottom, the rest regroup, and the next
-// step's keepers light up. When too few dots would be left to read, the
-// engine zooms in first: each survivor bursts into finer dots.
+// step's keepers light up. One scale holds for the whole sieve, so each
+// step's dots are a subset of the last step's and the count only goes down;
+// dots grow as the field thins, so the end stays visible.
 
 export interface SieveStep {
   value: number;
 }
 
-const MAX_DOTS = 9000;
-const MIN_READABLE = 90; // zoom in when a step would leave fewer dots than this
-const ZOOM_TARGET = 700; // aim for about this many dots after a zoom
-const UNITS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+const MAX_DOTS = 30000; // everyone, at the start
+// People per dot: 1, 2, 2.5, 5 times powers of ten.
+const UNITS = [0, 1, 2, 3, 4, 5].flatMap((e) => [1, 2, 2.5, 5].map((m) => m * 10 ** e)).filter((u) => u >= 1 && u % 1 === 0);
 
 const DROP_MS = 650;
 const FADE_MS = 450; // one dot's color change
 const WAVE_MS = 700; // spread of fade start times across the field
 const SHADES = 12; // color buckets between neutral and accent
 const MOVE_MS = 850;
-const ZOOM_MS = 900;
 
 const nice = (x: number) => UNITS.find((u) => u >= x) ?? UNITS[UNITS.length - 1];
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
@@ -61,39 +60,28 @@ interface Faller {
 
 export interface Plan {
   units: number[]; // people per dot at each step
-  zoomAt: boolean[]; // whether moving to step i zooms in
   field: number[]; // dots on screen at step i: everyone who reached it
   keep: number[]; // of those, dots this step keeps
 }
 
 export function plan(steps: SieveStep[]): Plan {
   const units: number[] = [];
-  const zoomAt: boolean[] = [];
   const field: number[] = [];
   const keep: number[] = [];
-  let unit = nice(Math.max(1, steps[0].value / MAX_DOTS));
+  const unit = nice(Math.max(1, steps[0].value / MAX_DOTS));
   steps.forEach((s, i) => {
-    const reached = i === 0 ? s.value : steps[i - 1].value;
-    let zoom = false;
-    if (i > 0 && unit > 1 && s.value / unit < MIN_READABLE) {
-      const next = Math.max(nice(s.value / ZOOM_TARGET), nice(reached / MAX_DOTS));
-      if (next < unit) {
-        unit = next;
-        zoom = true;
-      }
-    }
-    const f = Math.round(reached / unit);
-    // Anyone left at all gets at least one dot.
+    // The field is exactly the previous step's keepers, so dots never return.
+    const f = i === 0 ? Math.max(1, Math.round(s.value / unit)) : keep[i - 1];
+    // Anyone left at all keeps at least one dot.
     const k = Math.min(f, s.value >= 0.5 ? Math.max(1, Math.round(s.value / unit)) : 0);
     units.push(unit);
-    zoomAt.push(zoom);
-    field.push(Math.max(f, k));
+    field.push(f);
     keep.push(k);
   });
-  return { units, zoomAt, field, keep };
+  return { units, field, keep };
 }
 
-type Phase = "zoom" | "drop" | "move" | "fade";
+type Phase = "drop" | "move" | "fade";
 
 const dot = (x: number, y: number, keep: boolean, c: number): Dot => ({
   keep, c, c0: c, c1: c, t0: 0, dl: 0, x, y, fx: x, fy: y, tx: x, ty: y,
@@ -229,10 +217,9 @@ export class SieveEngine {
   }
 
   // Step forward: the non-keepers fall through and survivors regroup (all
-  // still in color). Then, after zooming to `zoomTo` dots if the unit
-  // shrinks, the next step's keepers stay lit as the top block while the rest
-  // fade to neutral in a wave rising from the bottom.
-  transition(zoomTo: number | null, keep: number, onDone: () => void) {
+  // still in color). Then the next step's keepers stay lit as the top block
+  // while the rest fade to neutral in a wave rising from the bottom.
+  transition(keep: number, onDone: () => void) {
     this.cancel();
     const run = (phase: Phase, after: () => void) => {
       this.anim = { start: performance.now(), phase, done: after };
@@ -247,22 +234,6 @@ export class SieveEngine {
       });
       run("fade", onDone);
     };
-    const zoom = () => {
-      if (zoomTo === null) return recolor();
-      const src = this.dots;
-      if (!src.length) {
-        this.set(zoomTo, 0);
-        return recolor();
-      }
-      const next: Dot[] = [];
-      for (let i = 0; i < zoomTo; i++) {
-        const s = src[i % src.length];
-        next.push(dot(s.x, s.y, false, 1));
-      }
-      this.dots = next;
-      this.relayout(true);
-      run("zoom", recolor);
-    };
     const survivors: Dot[] = [];
     let dropped = 0;
     for (const d of this.dots) {
@@ -274,20 +245,17 @@ export class SieveEngine {
       this.fallers.push({ x: d.x, y: d.y, vx: (this.rand() - 0.5) * 40, vy: this.rand() * 120, a: 1, r: this.radius });
     }
     this.dots = survivors;
-    if (!dropped) return zoom();
+    if (!dropped) return recolor();
     run("drop", () => {
       this.relayout(true);
-      run("move", zoom);
+      run("move", recolor);
     });
   }
 
-  // Step backward: the people this step removed rise back up from below. When
-  // the previous step used a coarser unit, first merge down to `collapseTo`
-  // dots at that unit.
-  restore(count: number, collapseTo: number | null, keep: number, onDone: () => void) {
+  // Step backward: the people this step removed rise back up from below.
+  restore(count: number, keep: number, onDone: () => void) {
     this.cancel();
     this.fallers = [];
-    if (collapseTo !== null) this.dots = this.dots.slice(0, Math.max(0, collapseTo));
     for (let i = this.dots.length; i < count; i++) {
       const x = this.rand() * this.w;
       const y = this.h + 10 + this.rand() * this.h * 0.6;
@@ -312,10 +280,9 @@ export class SieveEngine {
     const a = this.anim;
     let busy = this.fallers.length > 0;
     if (a) {
-      const dur =
-        a.phase === "zoom" ? ZOOM_MS : a.phase === "drop" ? DROP_MS : a.phase === "fade" ? FADE_MS + WAVE_MS + 120 : MOVE_MS;
+      const dur = a.phase === "drop" ? DROP_MS : a.phase === "fade" ? FADE_MS + WAVE_MS + 120 : MOVE_MS;
       const t = Math.min(1, (now - a.start) / dur);
-      if (a.phase === "zoom" || a.phase === "move") {
+      if (a.phase === "move") {
         const e = ease(t);
         this.radius = this.fromR + (this.toR - this.fromR) * e;
         for (const d of this.dots) {
@@ -377,7 +344,13 @@ export class SieveEngine {
       ctx.fillStyle = shade.fill;
       ctx.globalAlpha = shade.alpha;
       if (r < 1.6) {
-        for (const d of ds) ctx.fillRect(d.x - r, d.y - r, r * 2, r * 2);
+        // Too dense to see single dots: fill each dot's whole cell as one
+        // shape per color, so the field reads as solid regions (the share is
+        // still exact) instead of a shimmering moire of sub-pixel dots.
+        const h = r / 0.72 + 0.3;
+        ctx.beginPath();
+        for (const d of ds) ctx.rect(d.x - h, d.y - h, 2 * h, 2 * h);
+        ctx.fill();
         return;
       }
       ctx.beginPath();

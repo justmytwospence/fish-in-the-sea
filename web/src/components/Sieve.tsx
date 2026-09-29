@@ -16,7 +16,6 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
   const last = steps.length - 1;
   const [cur, setCur] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [zoomed, setZoomed] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const planRef = useRef(p);
 
@@ -54,7 +53,6 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       if (!e) return;
       setPlaying(false);
       setBusy(false);
-      setZoomed(null);
       e.set(p.field[i], p.keep[i]);
       setCur(i);
     },
@@ -68,13 +66,10 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       const e = engine.current;
       if (!e || from >= last) return;
       const next = from + 1;
-      const zoomTo = p.zoomAt[next] ? p.field[next] : null;
-      setZoomed(zoomTo !== null ? p.units[from] / p.units[next] : null);
       setBusy(true);
       setCur(next);
-      e.transition(zoomTo, p.keep[next], () => {
+      e.transition(p.keep[next], () => {
         setBusy(false);
-        setZoomed(null);
         if (next >= last) setPlaying(false);
       });
     },
@@ -87,13 +82,11 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       const e = engine.current;
       if (!e || from <= 0) return;
       const prev = from - 1;
-      // Collapse back to the coarser unit first, then everyone this step had
-      // becomes a keeper and the people the previous step dropped rise in.
-      const collapseTo = p.units[prev] !== p.units[from] ? p.keep[prev] : null;
-      setZoomed(null);
+      // Everyone this step had becomes a keeper again and the people the
+      // previous step dropped rise back in.
       setBusy(true);
       setCur(prev);
-      e.restore(p.field[prev], collapseTo, p.keep[prev], () => setBusy(false));
+      e.restore(p.field[prev], p.keep[prev], () => setBusy(false));
     },
     [p],
   );
@@ -141,7 +134,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
   // This step's keepers as a share of everyone who reached it.
   const share = prev && prev.value > 0 ? s.value / prev.value : 1;
   const modeled = s.kind === "survey" || s.kind === "dial";
-  const unit = zoomed ? p.units[Math.max(0, cur - 1)] : p.units[cur];
+  const unit = p.units[cur];
 
   return (
     <section aria-label="The sieve" className="mt-12">
@@ -190,7 +183,6 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
                 )}
               </span>
             </p>
-            {zoomed && <p className="mt-1 font-semibold uppercase tracking-widest text-accent">zooming in {Math.round(zoomed)}×</p>}
           </div>
         </div>
         <div ref={wrapRef} className="relative mt-2 w-full">
