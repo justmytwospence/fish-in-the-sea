@@ -48,7 +48,7 @@ cd .. && uv run python build.py && uv run python choice.py && uv run python cont
 - `choice.py` fits the revealed-preference model behind the competition section (a conditional logit on recently formed couples versus sampled single alternatives, about a minute).
 - `context.py` writes heights, health rates and per-metro context (health shifts, 2024 vote) and pulls BRFSS from data.cdc.gov.
 
-`pipeline/check_acs.sh` reports whether the ACS 2025 release has landed; when it has, change `YEAR` in `pipeline/build.py`, update the URLs above and rebuild.
+The site is a static snapshot of the data above. To refresh it for a later ACS release, change `YEAR` in `pipeline/build.py`, update the URLs above, rebuild and redeploy.
 
 ## Running the site
 
