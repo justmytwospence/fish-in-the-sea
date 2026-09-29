@@ -177,6 +177,9 @@ select p.*, st*100000 + puma as stpuma,
     when rel in (20,21,23) and hh.has_hh_kid = 1 then 1
     when rel in (25,26,27) and hh.has_grandkid = 1 then 1
     else 0 end as kids,
+  case when coalesce(pincp, 0) * adjinc / 1e6 >= 120000 then 3
+       when coalesce(pincp, 0) * adjinc / 1e6 >= 60000 then 2
+       when coalesce(pincp, 0) * adjinc / 1e6 >= 25000 then 1 else 0 end as inc,
   case {' '.join(f"when age between {lo} and {hi} then {i}" for i, (lo, hi) in enumerate(BINS))}
        else -1 end as bin
 from '{PQ}' p join hh using (SERIALNO)
@@ -186,13 +189,14 @@ div_of_state = {int(k): int(v) for k, v in state_div.items()}
 con.execute("create or replace table stdiv (st int, division int)")
 con.executemany("insert into stdiv values (?, ?)", list(div_of_state.items()))
 
-# Attribute cell: 0..11 = cohab*6 + edu*2 + kids; 12 = institutional group quarters.
-CELL = "case when inst = 1 then 12 else cohab*6 + edu*2 + kids end"
-NCELL = 13
+# Attribute cell: 0..47 = cohab*24 + edu*8 + kids*4 + inc (income bracket
+# <25k, 25-60k, 60-120k, 120k+ in 2024 dollars); 48 = institutional group quarters.
+CELL = "case when inst = 1 then 48 else cohab*24 + edu*8 + kids*4 + inc end"
+NCELL = 49
 
 
 def dist(df: pd.DataFrame, keys: list[str]) -> dict:
-    """Pivot weighted cell sums to {key tuple: (proportions[13], n_eff)}."""
+    """Pivot weighted cell sums to {key tuple: (proportions[NCELL], n_eff)}."""
     out = {}
     for k, g in df.groupby(keys):
         w = np.zeros(NCELL)
@@ -336,6 +340,9 @@ for m in markets:
 # Searchable places: every place >= 2,500 people that maps to a market.
 by_cbsa = {m["cbsa"]: m["id"] for m in markets if "cbsa" in m}
 by_place = {m["place"]: m["id"] for m in markets if "place" in m}
+gaz = pd.read_csv(RAW / "2024_Gaz_place_national.txt", sep="\t", dtype={"GEOID": str})
+gaz.columns = [c.strip() for c in gaz.columns]
+latlon = {g: (round(la, 3), round(lo, 3)) for g, la, lo in zip(gaz.GEOID, gaz.INTPTLAT, gaz.INTPTLONG)}
 plist = []
 for r in places[places["pop"] >= 2500].itertuples():
     mid = by_place.get(r.place) or (by_cbsa.get(r.cbsa) if isinstance(r.cbsa, str) else None)
@@ -346,7 +353,8 @@ for r in places[places["pop"] >= 2500].itertuples():
                 r"consolidated government \(balance\)|unified government \(balance\))(?=,)",
                 "", r.NAME)
     nm = re.sub(r"\s*\(balance\)", "", nm)
-    plist.append([nm.split(",")[0], state_abbr[r.STATE], mid, int(r.pop)])
+    la, lo = latlon.get(r.place, (None, None))
+    plist.append([nm.split(",")[0], state_abbr[r.STATE], mid, int(r.pop), la, lo])
 plist.sort(key=lambda x: -x[3])
 
 (OUT / "markets.json").write_text(json.dumps(

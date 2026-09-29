@@ -9,3 +9,4 @@ web/.vercel/
 web/next-env.d.ts
 .vercel
 .claude/worktrees/
+pipeline/raw
