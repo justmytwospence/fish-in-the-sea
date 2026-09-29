@@ -1,80 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fmt, shortCity } from "@/lib/format";
-
-type Place = [name: string, state: string, market: string, pop: number];
-interface Index {
-  markets: { id: string; name: string; kind: string; pop: number }[];
-  places: Place[];
-}
-
-let indexPromise: Promise<Index> | undefined;
-const loadIndex = () => (indexPromise ??= fetch("/data/markets.json").then((r) => r.json()));
-
-const ALIASES: Record<string, string> = {
-  nyc: "new york",
-  sf: "san francisco",
-  la: "los angeles",
-  dc: "washington",
-  philly: "philadelphia",
-  vegas: "las vegas",
-  nola: "new orleans",
-  atl: "atlanta",
-  chi: "chicago",
-  slc: "salt lake city",
-};
-
-const norm = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/\bst\.?\s/g, "saint ")
-    .replace(/[^a-z0-9 ]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-interface Hit {
-  label: string;
-  sub: string;
-  market: string;
-  score: number;
-}
-
-function search(idx: Index, raw: string): Hit[] {
-  const q = norm(ALIASES[norm(raw)] ?? raw);
-  if (!q) return [];
-  const byId = new Map(idx.markets.map((m) => [m.id, m]));
-  const hits = new Map<string, Hit>();
-  const consider = (label: string, sub: string, market: string, score: number) => {
-    const key = `${label}|${market}`;
-    if (!hits.has(key) || hits.get(key)!.score < score) hits.set(key, { label, sub, market, score });
-  };
-  for (const [name, st, market, pop] of idx.places) {
-    const n = norm(`${name} ${st}`);
-    const words = norm(name);
-    let base = 0;
-    if (words.startsWith(q) || n.startsWith(q)) base = 3;
-    else if (n.split(" ").some((w) => w.startsWith(q.split(" ")[0])) && n.includes(q)) base = 1.5;
-    else if (n.includes(q)) base = 1;
-    if (!base) continue;
-    const m = byId.get(market)!;
-    const mname = m.name.split(",")[0].split("-")[0];
-    const sub =
-      mname === name
-        ? `${m.kind === "metro" ? "Metro" : "Micro area"} · ${fmt(m.pop)} people`
-        : `Part of the ${mname} ${m.kind === "metro" ? "metro" : "area"} · ${fmt(m.pop)}`;
-    consider(`${name}, ${st}`, sub, market, base + Math.log10(pop) / 10);
-  }
-  for (const m of idx.markets) {
-    const n = norm(m.name);
-    if (n.startsWith(q) || n.includes(` ${q}`)) {
-      consider(m.name, `${m.kind === "metro" ? "Metro" : "Micro area"} · ${fmt(m.pop)} people`, m.id, 2 + Math.log10(m.pop) / 10);
-    }
-  }
-  return [...hits.values()].sort((a, b) => b.score - a.score).slice(0, 8);
-}
+import { shortCity } from "@/lib/format";
+import { loadPlaceIndex, searchPlaces, type Hit, type PlaceIndex } from "@/lib/place-search";
 
 export default function CityPicker({
   marketName,
@@ -83,16 +11,16 @@ export default function CityPicker({
   marketName: string;
   onPick: (market: string) => void;
 }) {
-  const [idx, setIdx] = useState<Index | null>(null);
+  const [idx, setIdx] = useState<PlaceIndex | null>(null);
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const hits = useMemo(() => (idx && text ? search(idx, text) : []), [idx, text]);
-  const display = `${shortCity(marketName)}, ${marketName.split(", ").pop()?.split("-")[0]}`;
+  const hits = useMemo(() => (idx && text ? searchPlaces(idx, text) : []), [idx, text]);
+  const display = `${shortCity(marketName).replace(/ County$/, " Co.")}, ${marketName.split(", ").pop()?.split("-")[0]}`;
 
   useEffect(() => {
-    if (open) loadIndex().then(setIdx);
+    if (open) loadPlaceIndex().then(setIdx);
   }, [open]);
 
   const pick = (h: Hit) => {

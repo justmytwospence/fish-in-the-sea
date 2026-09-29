@@ -16,7 +16,7 @@ type UMarg = Exclude<Marg, "mar">;
 export interface Shard {
   id: string;
   name: string;
-  kind: "metro" | "micro" | "city";
+  kind: "metro" | "micro" | "rural";
   division: number;
   pop: number;
   sexPop: Record<"1" | "2", number>;
@@ -492,7 +492,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   const push = (key: string, label: string, dropped: string, a: Acc, kind: StepKind, sources: Source[], note: string) =>
     steps.push({ key, label, dropped, value: a.value, moe: Z90 * Math.sqrt(a.variance), kind, sources, note });
 
-  push("pop", `Everyone in the ${s.kind === "micro" ? "area" : "metro"}`, "", { value: s.pop, variance: 0 }, "census", [SOURCES.pop],
+  push("pop", `Everyone in the ${s.kind === "micro" ? "area" : s.kind === "rural" ? "county" : "metro"}`, "", { value: s.pop, variance: 0 }, "census", [SOURCES.pop],
     "Total population of the Census metropolitan or micropolitan statistical area, all ages.");
   push("sex", cap(who), noun(M === T ? (T === 1 ? 2 : 1) : M), { value: s.sexPop[String(T) as "1" | "2"], variance: 0 }, "census", [SOURCES.pop],
     "Census asks about sex, not gender identity; this is the ACS sex variable.");

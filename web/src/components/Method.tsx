@@ -18,11 +18,13 @@ export default function Method({ dataYear }: { dataYear: string }) {
         <p>
           <strong>Geography.</strong> Dating markets are metro areas, not city limits, so every city maps to its
           Census metropolitan or micropolitan statistical area (a county-based region around an urban core of
-          10,000+). Search for Decatur, GA and you get the Atlanta metro.
+          10,000+). Search for Decatur, GA and you get the Atlanta metro. Towns outside any metro or micro area use
+          their county, so Crested Butte, CO is Gunnison County. County samples are small, so treat rural numbers
+          as rough.
         </p>
         <p>
           <strong>Counts.</strong> Population, sex, age and marital status come straight from the{" "}
-          <Src s={SOURCES.acs} />, the most recent release that covers every metro (the 2025 release has been
+          <Src s={SOURCES.acs} />, the most recent release that covers every county (the 2025 release has been
           delayed indefinitely). Those counts are centered around 2022, so each sex and age group is scaled to the{" "}
           <Src s={SOURCES.pep} /> while keeping the ACS marital-status mix. ACS reports ages in five-year bins;
           custom ranges are split using single-year-of-age shares from the microdata. &ldquo;Not married&rdquo; means

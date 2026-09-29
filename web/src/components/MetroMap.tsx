@@ -4,14 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import type { Geometry, Position } from "geojson";
-import type { RankResponse, Sort } from "@/app/api/rank/route";
-import { statesOf } from "@/lib/states";
+import type { RankResponse, Sort } from "@/lib/rank";
 import { fmt } from "@/lib/format";
 
 type Row = RankResponse["all"][number];
 
 interface Shape {
-  id: string; // CBSA code or state postal code
+  id: string; // CBSA code, "C" + county FIPS, or state postal code
   d: string;
   box: [number, number, number, number]; // x0, y0, x1, y1 in map units
 }
@@ -85,9 +84,9 @@ function scaleFor(sort: Sort, rows: Row[]): Scale {
     const labels = ["under ×0.5", "×0.5–0.75", "×0.75–0.9", "×0.9–1.1", "×1.1–1.33", "over ×1.33"];
     const cls = (v: number) => cuts.filter((c) => v >= c).length;
     return {
-      color: (r) => colors[cls(r[4])],
+      color: (r) => (r[4] > 0 ? colors[cls(r[4])] : "var(--rule)"),
       legend: colors.map((color, i) => ({ color, label: labels[i] })),
-      describe: (r) => `×${r[4].toFixed(2)} competition multiplier`,
+      describe: (r) => (r[4] > 0 ? `×${r[4].toFixed(2)} competition multiplier` : "too few people to say"),
     };
   }
   const idx = sort === "raw" ? 2 : 3;
@@ -107,18 +106,23 @@ function scaleFor(sort: Sort, rows: Row[]): Scale {
   };
 }
 
-// Choropleth of every metro for the current search and ranking mode.
+// Choropleth of every place for the current search and ranking mode; places
+// outside the chosen set or states are faded.
 export default function MetroMap({
   rows,
-  states,
+  inView,
+  zoomStates: states,
   sort,
   current,
+  pins,
   onPick,
 }: {
   rows: Row[];
-  states: string[];
+  inView: (r: Row) => boolean;
+  zoomStates: string[];
   sort: Sort;
   current: string;
+  pins: Set<string>;
   onPick: (id: string) => void;
 }) {
   const [map, setMap] = useState<Awaited<ReturnType<typeof loadMap>> | null>(null);
@@ -130,9 +134,10 @@ export default function MetroMap({
   }, []);
 
   const byCbsa = useMemo(() => new Map(rows.map((r) => [r[5], r])), [rows]);
-  const scale = useMemo(() => scaleFor(sort, rows), [sort, rows]);
+  const scale = useMemo(() => scaleFor(sort, rows.filter(inView)), [sort, rows, inView]);
   const mine = rows.find((r) => r[0] === current);
-  const inStates = (r: Row) => !states.length || statesOf(r[1]).some((s) => states.includes(s));
+  const pinned = rows.filter((r) => pins.has(r[0]) && r[0] !== current);
+  const shapeOf = (r: Row) => map?.cbsa.find((s) => s.id === r[5])?.d ?? "";
 
   if (!map) return <div className="mt-6 aspect-[1.6] w-full rounded-lg bg-rule/20" />;
 
@@ -164,7 +169,7 @@ export default function MetroMap({
   return (
     <figure className="mt-6">
       <div ref={wrap} className="relative" onMouseLeave={() => setHover(null)}>
-        <svg viewBox={viewBox} className="block w-full" role="img" aria-label="Map of metro areas colored by the current ranking">
+        <svg viewBox={viewBox} className="block w-full" role="img" aria-label="Map of metro areas, micro areas and rural counties colored by the current ranking">
           <g>
             {map.cbsa.map((s) => {
               const r = byCbsa.get(s.id);
@@ -173,7 +178,7 @@ export default function MetroMap({
                   key={s.id}
                   d={s.d}
                   fill={r ? scale.color(r) : "var(--rule)"}
-                  opacity={r ? (inStates(r) ? 1 : 0.18) : 0.35}
+                  opacity={r ? (inView(r) ? 1 : 0.15) : 0.35}
                   className={r ? "cursor-pointer" : ""}
                   onMouseMove={(e) => {
                     if (!r || !wrap.current) return;
@@ -190,9 +195,20 @@ export default function MetroMap({
               <path key={s.id} d={s.d} />
             ))}
           </g>
+          {pinned.map((r) => (
+            <path
+              key={r[0]}
+              d={shapeOf(r)}
+              fill="none"
+              className="stroke-ink"
+              strokeWidth={2}
+              strokeDasharray="4 3"
+              pointerEvents="none"
+            />
+          ))}
           {mine && (
             <path
-              d={map.cbsa.find((s) => s.id === mine[5])?.d ?? ""}
+              d={shapeOf(mine)}
               fill="none"
               className="stroke-ink"
               strokeWidth={3}
@@ -229,10 +245,6 @@ export default function MetroMap({
             {l.label}
           </span>
         ))}
-        <span className="flex items-center gap-1">
-          <span aria-hidden className="inline-block h-2.5 w-3.5 rounded-sm bg-rule opacity-40" />
-          micro areas (not ranked)
-        </span>
       </figcaption>
     </figure>
   );

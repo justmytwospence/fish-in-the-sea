@@ -140,8 +140,20 @@ export const SOURCES = {
     url: "https://data.cdc.gov/Behavioral-Risk-Factors/Behavioral-Risk-Factors-Selected-Metropolitan-Area/j32a-sa6u",
   },
   pep: {
-    label: "Census Vintage 2025 population estimates by metro, sex and age",
-    url: "https://www2.census.gov/programs-surveys/popest/datasets/2020-2025/metro/asrh/",
+    label: "Census Vintage 2025 population estimates by metro and county, sex and age",
+    url: "https://www2.census.gov/programs-surveys/popest/datasets/2020-2025/",
+  },
+  ersTypology: {
+    label: "USDA ERS County Typology Codes, 2025 edition",
+    url: "https://www.ers.usda.gov/data-products/county-typology-codes",
+  },
+  mountains: {
+    label: "Kapos et al. (2000), the UNEP-WCMC definition of mountain terrain",
+    url: "https://doi.org/10.1079/9780851994468.0004",
+  },
+  terrainTiles: {
+    label: "AWS Terrain Tiles (USGS 3DEP elevations)",
+    url: "https://registry.opendata.aws/terrain-tiles/",
   },
   election: {
     label: "2024 presidential results by county (compiled from official returns)",

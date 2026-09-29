@@ -1,27 +1,29 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RankResponse } from "@/app/api/rank/route";
+import type { RankResponse } from "@/lib/rank";
 import { fmt, shortCity } from "@/lib/format";
 
 type Row = RankResponse["all"][number];
 
 const M = { top: 16, right: 16, bottom: 44, left: 48 };
 
-// Every metro as a dot: raw pool across (log), the competition multiplier up
+// Every place as a dot: raw pool across (log), the competition multiplier up
 // (x1 is a balanced market). Adjusted pool = raw x multiplier, so the faint
-// curves are constant adjusted pools. Your metro, its ranking neighbors and
-// the leaders are emphasized; everything else stays recessive.
+// curves are constant adjusted pools. Yours, its ranking neighbors, pinned
+// places and the leaders are emphasized; everything else stays recessive.
 export default function MetroChart({
   rows: input,
   topIds,
   neighborIds,
+  pinIds,
   current,
   onPick,
 }: {
   rows: Row[];
   topIds: Set<string>;
   neighborIds: Set<string>;
+  pinIds: Set<string>;
   current: string;
   onPick: (id: string) => void;
 }) {
@@ -56,14 +58,18 @@ export default function MetroChart({
     return { A, d: pts.length > 1 ? `M${pts.join("L")}` : "" };
   });
 
-  // Draw order: background dots, then neighbors, then leaders, then you.
-  const layer = (r: Row) => (r[0] === current ? 3 : topIds.has(r[0]) ? 2 : neighborIds.has(r[0]) ? 1 : 0);
+  // Draw order: background dots, then neighbors, then leaders and pinned
+  // places, then you.
+  const layer = (r: Row) =>
+    r[0] === current ? 3 : topIds.has(r[0]) || pinIds.has(r[0]) ? 2 : neighborIds.has(r[0]) ? 1 : 0;
   const ordered = [...rows].sort((a, b) => layer(a) - layer(b));
-  // Greedy label placement: yours first, then the leaders; nudge up or down
+  // Greedy label placement: yours first, then pinned places, then the
+  // leaders; nudge up or down
   // once to dodge a collision, otherwise skip (the list below names them).
   const labeled: { r: Row; dy: number }[] = [];
   const boxes: [number, number, number, number][] = [];
-  for (const r of [...ordered].reverse().filter((r) => layer(r) >= 2)) {
+  const labelOrder = (r: Row) => (r[0] === current ? 0 : pinIds.has(r[0]) ? 1 : 2);
+  for (const r of ordered.filter((r) => layer(r) >= 2).sort((a, b) => labelOrder(a) - labelOrder(b))) {
     const x = px(r[2]);
     const right = x < w - 120;
     const text = r[0] === current ? `You: ${shortCity(r[1])}` : shortCity(r[1]);
@@ -82,7 +88,7 @@ export default function MetroChart({
 
   return (
     <div ref={ref} className="relative mt-6">
-      <svg width={w} height={h} role="img" aria-label="Every metro by raw pool and competition multiplier" className="block">
+      <svg width={w} height={h} role="img" aria-label="Every place by raw pool and competition multiplier" className="block">
         {yTicks.map((t) => (
           <g key={`y${t}`}>
             <line
@@ -140,7 +146,7 @@ export default function MetroChart({
               <circle
                 cx={x}
                 cy={y}
-                r={L === 3 ? 7 : L >= 1 ? 4.5 : 3.5}
+                r={L === 3 ? 7 : pinIds.has(r[0]) ? 5.5 : L >= 1 ? 4.5 : 3.5}
                 className={L === 3 ? "fill-accent stroke-card" : L >= 1 ? "fill-ink stroke-card" : "fill-muted"}
                 strokeWidth={L >= 1 ? 2 : 0}
                 opacity={L === 0 ? 0.45 : 1}

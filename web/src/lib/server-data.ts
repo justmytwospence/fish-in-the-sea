@@ -13,7 +13,7 @@ const shards = new Map<string, Promise<Shard>>();
 
 export interface MarketIndex {
   year: string;
-  markets: { id: string; name: string; kind: string; pop: number; cbsa?: string }[];
+  markets: { id: string; name: string; kind: string; pop: number; cbsa?: string; county?: string; tags?: string[] }[];
   places: [name: string, state: string, market: string, pop: number, lat: number | null, lon: number | null][];
 }
 
