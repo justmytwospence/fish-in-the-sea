@@ -16,6 +16,9 @@ const ZOOM_TARGET = 700; // aim for about this many dots after a zoom
 const UNITS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
 
 const DROP_MS = 650;
+const FADE_MS = 450; // one dot's color change
+const WAVE_MS = 700; // spread of fade start times across the field
+const SHADES = 12; // color buckets between neutral and accent
 const MOVE_MS = 850;
 const ZOOM_MS = 900;
 
@@ -34,6 +37,11 @@ function rng(seed: number) {
 
 interface Dot {
   keep: boolean;
+  c: number; // color: 0 = neutral, 1 = accent (tweened)
+  c0: number;
+  c1: number;
+  t0: number; // fade start (ms) and per-dot delay
+  dl: number;
   x: number;
   y: number;
   fx: number; // tween from
@@ -85,6 +93,12 @@ export function plan(steps: SieveStep[]): Plan {
   return { units, zoomAt, field, keep };
 }
 
+type Phase = "zoom" | "drop" | "move" | "fade";
+
+const dot = (x: number, y: number, keep: boolean, c: number): Dot => ({
+  keep, c, c0: c, c1: c, t0: 0, dl: 0, x, y, fx: x, fy: y, tx: x, ty: y,
+});
+
 export class SieveEngine {
   private ctx: CanvasRenderingContext2D;
   private w = 0;
@@ -97,9 +111,10 @@ export class SieveEngine {
   private toR = 2;
   private lastT = 0;
   private raf = 0;
-  private anim: { start: number; phase: "zoom" | "drop" | "move"; done: () => void } | null = null;
+  private anim: { start: number; phase: Phase; done: () => void } | null = null;
   private rand = rng(7);
   private colors = { ink: "#222", accent: "#c8412a", muted: "#888" };
+  private shades: { fill: string; alpha: number }[] = [];
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d")!;
@@ -122,6 +137,28 @@ export class SieveEngine {
     this.colors.ink = cs.getPropertyValue("--census").trim() || this.colors.ink;
     this.colors.accent = cs.getPropertyValue("--accent").trim() || this.colors.accent;
     this.colors.muted = cs.getPropertyValue("--muted").trim() || this.colors.muted;
+    // Precompute the color ramp from neutral to accent. The canvas normalizes
+    // any CSS color to #rrggbb, which makes it easy to parse.
+    const rgb = (color: string) => {
+      this.ctx.fillStyle = color;
+      const h = String(this.ctx.fillStyle);
+      return h.startsWith("#") ? [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) : [128, 128, 128];
+    };
+    const a = rgb(this.colors.muted);
+    const b = rgb(this.colors.accent);
+    this.shades = Array.from({ length: SHADES }, (_, i) => {
+      const t = i / (SHADES - 1);
+      const m = a.map((v, k) => Math.round(v + (b[k] - v) * t));
+      return { fill: `rgb(${m[0]},${m[1]},${m[2]})`, alpha: 0.55 + 0.45 * t };
+    });
+  }
+
+  // Start a color change for one dot.
+  private fadeTo(d: Dot, target: number, now: number, delay: number) {
+    d.c0 = d.c;
+    d.c1 = target;
+    d.t0 = now;
+    d.dl = delay;
   }
 
   // Grid positions for n dots, centered, sized to fill the canvas.
@@ -175,7 +212,7 @@ export class SieveEngine {
     this.cancel();
     this.rand = rng(seed);
     this.fallers = [];
-    this.dots = Array.from({ length: count }, (_, i) => ({ keep: i < keep, x: 0, y: 0, fx: 0, fy: 0, tx: 0, ty: 0 }));
+    this.dots = Array.from({ length: count }, (_, i) => dot(0, 0, i < keep, i < keep ? 1 : 0));
     const { pts, r } = this.layout(count);
     this.radius = this.fromR = this.toR = r;
     this.dots.forEach((d, i) => {
@@ -191,19 +228,24 @@ export class SieveEngine {
     this.anim = null;
   }
 
-  // Step forward: the non-keepers fall through, survivors regroup, then
-  // (after zooming to `zoomTo` dots if the unit shrinks) the next step's
-  // `keep` dots light up at the top.
+  // Step forward: the non-keepers fall through and survivors regroup (all
+  // still in color). Then, after zooming to `zoomTo` dots if the unit
+  // shrinks, the next step's keepers stay lit as the top block while the rest
+  // fade to neutral in a wave rising from the bottom.
   transition(zoomTo: number | null, keep: number, onDone: () => void) {
     this.cancel();
-    const run = (phase: "zoom" | "drop" | "move", after: () => void) => {
+    const run = (phase: Phase, after: () => void) => {
       this.anim = { start: performance.now(), phase, done: after };
       if (!this.raf) this.raf = requestAnimationFrame(this.loop);
     };
     const recolor = () => {
       this.markKeep(keep);
-      this.relayout(true);
-      run("move", onDone);
+      const now = performance.now();
+      const n = this.dots.length;
+      this.dots.forEach((d, i) => {
+        if (!d.keep) this.fadeTo(d, 0, now, (1 - i / n) * WAVE_MS + this.rand() * 120);
+      });
+      run("fade", onDone);
     };
     const zoom = () => {
       if (zoomTo === null) return recolor();
@@ -215,7 +257,7 @@ export class SieveEngine {
       const next: Dot[] = [];
       for (let i = 0; i < zoomTo; i++) {
         const s = src[i % src.length];
-        next.push({ keep: false, x: s.x, y: s.y, fx: s.x, fy: s.y, tx: s.x, ty: s.y });
+        next.push(dot(s.x, s.y, false, 1));
       }
       this.dots = next;
       this.relayout(true);
@@ -249,11 +291,16 @@ export class SieveEngine {
     for (let i = this.dots.length; i < count; i++) {
       const x = this.rand() * this.w;
       const y = this.h + 10 + this.rand() * this.h * 0.6;
-      this.dots.push({ keep: false, x, y, fx: x, fy: y, tx: x, ty: y });
+      this.dots.push(dot(x, y, false, 0));
     }
     this.markKeep(keep);
+    const now = performance.now();
+    const n = this.dots.length;
+    this.dots.forEach((d, i) => {
+      if (d.keep && d.c1 < 1) this.fadeTo(d, 1, now, (i / n) * WAVE_MS * 0.6);
+    });
     this.relayout(true);
-    this.anim = { start: performance.now(), phase: "move", done: onDone };
+    this.anim = { start: now, phase: "move", done: onDone };
     if (!this.raf) this.raf = requestAnimationFrame(this.loop);
   }
 
@@ -265,9 +312,10 @@ export class SieveEngine {
     const a = this.anim;
     let busy = this.fallers.length > 0;
     if (a) {
-      const dur = a.phase === "zoom" ? ZOOM_MS : a.phase === "drop" ? DROP_MS : MOVE_MS;
+      const dur =
+        a.phase === "zoom" ? ZOOM_MS : a.phase === "drop" ? DROP_MS : a.phase === "fade" ? FADE_MS + WAVE_MS + 120 : MOVE_MS;
       const t = Math.min(1, (now - a.start) / dur);
-      if (a.phase !== "drop") {
+      if (a.phase === "zoom" || a.phase === "move") {
         const e = ease(t);
         this.radius = this.fromR + (this.toR - this.fromR) * e;
         for (const d of this.dots) {
@@ -279,6 +327,16 @@ export class SieveEngine {
         this.anim = null;
         a.done();
       }
+      busy = true;
+    }
+    for (const d of this.dots) {
+      if (d.c === d.c1) continue;
+      const t = (now - d.t0 - d.dl) / FADE_MS;
+      if (t <= 0) {
+        busy = true;
+        continue;
+      }
+      d.c = t >= 1 ? d.c1 : d.c0 + (d.c1 - d.c0) * ease(t);
       busy = true;
     }
     this.stepFallers(dt);
@@ -311,23 +369,24 @@ export class SieveEngine {
     }
     ctx.globalAlpha = 1;
     const r = this.radius;
-    const paint = (keep: boolean, color: string, alpha: number) => {
-      ctx.fillStyle = color;
-      ctx.globalAlpha = alpha;
+    const buckets: Dot[][] = Array.from({ length: SHADES }, () => []);
+    for (const d of this.dots) buckets[Math.round(d.c * (SHADES - 1))].push(d);
+    buckets.forEach((ds, i) => {
+      if (!ds.length) return;
+      const shade = this.shades[i] ?? { fill: this.colors.muted, alpha: 0.55 };
+      ctx.fillStyle = shade.fill;
+      ctx.globalAlpha = shade.alpha;
       if (r < 1.6) {
-        for (const d of this.dots) if (d.keep === keep) ctx.fillRect(d.x - r, d.y - r, r * 2, r * 2);
+        for (const d of ds) ctx.fillRect(d.x - r, d.y - r, r * 2, r * 2);
         return;
       }
       ctx.beginPath();
-      for (const d of this.dots) {
-        if (d.keep !== keep) continue;
+      for (const d of ds) {
         ctx.moveTo(d.x + r, d.y);
         ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
       }
       ctx.fill();
-    };
-    paint(false, this.colors.muted, 0.55);
-    paint(true, this.colors.accent, 1);
+    });
     ctx.globalAlpha = 1;
   }
 
