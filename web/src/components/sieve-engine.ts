@@ -1,9 +1,10 @@
 // Canvas engine for the sieve: a field of dots (each one standing for `unit`
-// people). The dots that make it through every step ("keepers") sit together
-// at the top of the field in the accent color, so the proportion is visible at
-// a glance. Stepping forward drops non-keepers through the bottom and the
-// rest regroup; when too few dots are left to read, the engine zooms in and
-// each survivor bursts into finer dots at a smaller unit.
+// people). At each step the field holds everyone who reached that step and
+// the ones this step keeps ("keepers") sit together at the top in the accent
+// color, so the step's proportion is visible at a glance. Stepping forward
+// drops the non-keepers through the bottom, the rest regroup, and the next
+// step's keepers light up. When too few dots would be left to read, the
+// engine zooms in first: each survivor bursts into finer dots.
 
 export interface SieveStep {
   value: number;
@@ -52,36 +53,36 @@ interface Faller {
 
 export interface Plan {
   units: number[]; // people per dot at each step
-  zoomAt: boolean[]; // whether step i starts with a zoom
-  counts: number[]; // dots at each step
-  keep: number[]; // of those, dots that make it through every step
+  zoomAt: boolean[]; // whether moving to step i zooms in
+  field: number[]; // dots on screen at step i: everyone who reached it
+  keep: number[]; // of those, dots this step keeps
 }
 
 export function plan(steps: SieveStep[]): Plan {
   const units: number[] = [];
   const zoomAt: boolean[] = [];
-  const counts: number[] = [];
+  const field: number[] = [];
+  const keep: number[] = [];
   let unit = nice(Math.max(1, steps[0].value / MAX_DOTS));
   steps.forEach((s, i) => {
+    const reached = i === 0 ? s.value : steps[i - 1].value;
     let zoom = false;
     if (i > 0 && unit > 1 && s.value / unit < MIN_READABLE) {
-      const prev = steps[i - 1].value;
-      const next = Math.max(nice(s.value / ZOOM_TARGET), nice(prev / MAX_DOTS));
+      const next = Math.max(nice(s.value / ZOOM_TARGET), nice(reached / MAX_DOTS));
       if (next < unit) {
         unit = next;
         zoom = true;
       }
     }
+    const f = Math.round(reached / unit);
+    // Anyone left at all gets at least one dot.
+    const k = Math.min(f, s.value >= 0.5 ? Math.max(1, Math.round(s.value / unit)) : 0);
     units.push(unit);
     zoomAt.push(zoom);
-    counts.push(Math.round(s.value / unit));
+    field.push(Math.max(f, k));
+    keep.push(k);
   });
-  // Anyone left at all gets at least one dot, even when they're fewer than a
-  // dot's worth of people.
-  const final = steps[steps.length - 1].value;
-  const keep = units.map((u, i) => Math.min(counts[i], final >= 0.5 ? Math.max(1, Math.round(final / u)) : 0));
-  keep.forEach((k, i) => (counts[i] = Math.max(counts[i], k)));
-  return { units, zoomAt, counts, keep };
+  return { units, zoomAt, field, keep };
 }
 
 export class SieveEngine {
@@ -190,48 +191,27 @@ export class SieveEngine {
     this.anim = null;
   }
 
-  // Animate to a new dot count, optionally zooming to `zoomTo` dots first.
-  // Only non-keepers fall.
-  transition(count: number, zoomTo: number | null, keep: number, onDone: () => void) {
+  // Step forward: the non-keepers fall through, survivors regroup, then
+  // (after zooming to `zoomTo` dots if the unit shrinks) the next step's
+  // `keep` dots light up at the top.
+  transition(zoomTo: number | null, keep: number, onDone: () => void) {
     this.cancel();
     const run = (phase: "zoom" | "drop" | "move", after: () => void) => {
       this.anim = { start: performance.now(), phase, done: after };
       if (!this.raf) this.raf = requestAnimationFrame(this.loop);
     };
-    const drop = () => {
-      const n = this.dots.length;
-      const k = Math.max(0, Math.min(n, count));
-      if (k < n) {
-        // Pick who falls through, at random, from the non-keepers.
-        const idx = this.dots.map((_, i) => i).filter((i) => !this.dots[i].keep);
-        for (let i = idx.length - 1; i > 0; i--) {
-          const j = Math.floor(this.rand() * (i + 1));
-          [idx[i], idx[j]] = [idx[j], idx[i]];
-        }
-        const gone = new Set(idx.slice(0, Math.min(idx.length, n - k)));
-        const keep: Dot[] = [];
-        this.dots.forEach((d, i) => {
-          if (gone.has(i))
-            this.fallers.push({
-              x: d.x,
-              y: d.y,
-              vx: (this.rand() - 0.5) * 40,
-              vy: this.rand() * 120,
-              a: 1,
-              r: this.radius,
-            });
-          else keep.push(d);
-        });
-        this.dots = keep;
-      }
-      run("drop", () => {
-        this.relayout(true);
-        run("move", onDone);
-      });
+    const recolor = () => {
+      this.markKeep(keep);
+      this.relayout(true);
+      run("move", onDone);
     };
-    if (zoomTo !== null && this.dots.length > 0) {
-      // Each survivor bursts into finer dots.
+    const zoom = () => {
+      if (zoomTo === null) return recolor();
       const src = this.dots;
+      if (!src.length) {
+        this.set(zoomTo, 0);
+        return recolor();
+      }
       const next: Dot[] = [];
       for (let i = 0; i < zoomTo; i++) {
         const s = src[i % src.length];
@@ -239,12 +219,24 @@ export class SieveEngine {
       }
       this.dots = next;
       this.relayout(true);
-      this.markKeep(keep);
-      run("zoom", drop);
-    } else if (zoomTo !== null) {
-      this.set(zoomTo, keep);
-      drop();
-    } else drop();
+      run("zoom", recolor);
+    };
+    const survivors: Dot[] = [];
+    let dropped = 0;
+    for (const d of this.dots) {
+      if (d.keep) {
+        survivors.push(d);
+        continue;
+      }
+      dropped++;
+      this.fallers.push({ x: d.x, y: d.y, vx: (this.rand() - 0.5) * 40, vy: this.rand() * 120, a: 1, r: this.radius });
+    }
+    this.dots = survivors;
+    if (!dropped) return zoom();
+    run("drop", () => {
+      this.relayout(true);
+      run("move", zoom);
+    });
   }
 
   // Step backward: the people this step removed rise back up from below. When

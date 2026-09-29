@@ -26,9 +26,9 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
     const e = new SieveEngine(canvas);
     engine.current = e;
     e.readColors();
-    // Start still: everyone, with the ones who make it all the way in color.
+    // Start still on step one (everyone, all in color).
     // Nothing moves until you step or press play.
-    e.set(planRef.current.counts[0], planRef.current.keep[0]);
+    e.set(planRef.current.field[0], planRef.current.keep[0]);
     const ro = new ResizeObserver(([entry]) => {
       const w = entry.contentRect.width;
       const h = Math.round(Math.min(460, Math.max(300, w * (w < 640 ? 0.95 : 0.56))));
@@ -55,7 +55,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       setPlaying(false);
       setBusy(false);
       setZoomed(null);
-      e.set(p.counts[i], p.keep[i]);
+      e.set(p.field[i], p.keep[i]);
       setCur(i);
     },
     [p],
@@ -68,17 +68,17 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       const e = engine.current;
       if (!e || from >= last) return;
       const next = from + 1;
-      const zoomTo = p.zoomAt[next] ? Math.round(steps[from].value / p.units[next]) : null;
+      const zoomTo = p.zoomAt[next] ? p.field[next] : null;
       setZoomed(zoomTo !== null ? p.units[from] / p.units[next] : null);
       setBusy(true);
       setCur(next);
-      e.transition(p.counts[next], zoomTo, p.keep[next], () => {
+      e.transition(zoomTo, p.keep[next], () => {
         setBusy(false);
         setZoomed(null);
         if (next >= last) setPlaying(false);
       });
     },
-    [p, last, steps],
+    [p, last],
   );
 
   // One animated step back: the people removed rise back into the field.
@@ -87,13 +87,15 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       const e = engine.current;
       if (!e || from <= 0) return;
       const prev = from - 1;
-      const collapseTo = p.units[prev] !== p.units[from] ? Math.round(steps[from].value / p.units[prev]) : null;
+      // Collapse back to the coarser unit first, then everyone this step had
+      // becomes a keeper and the people the previous step dropped rise in.
+      const collapseTo = p.units[prev] !== p.units[from] ? p.keep[prev] : null;
       setZoomed(null);
       setBusy(true);
       setCur(prev);
-      e.restore(p.counts[prev], collapseTo, p.keep[prev], () => setBusy(false));
+      e.restore(p.field[prev], collapseTo, p.keep[prev], () => setBusy(false));
     },
-    [p, steps],
+    [p],
   );
 
   // Manual navigation pauses autoplay. Adjacent steps animate; mid-animation
@@ -135,8 +137,9 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
   }, [playing, busy, cur, last, forward]);
 
   const s = steps[cur];
-  const final = steps[last].value;
   const prev = cur > 0 ? steps[cur - 1] : null;
+  // This step's keepers as a share of everyone who reached it.
+  const share = prev && prev.value > 0 ? s.value / prev.value : 1;
   const modeled = s.kind === "survey" || s.kind === "dial";
   const unit = zoomed ? p.units[Math.max(0, cur - 1)] : p.units[cur];
 
@@ -177,8 +180,14 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
             <p className="mt-1 flex items-center justify-end gap-1.5">
               <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-accent" />
               <span>
-                <span className="font-medium text-ink">{fmt(final)}</span> make it all the way
-                {cur < last && s.value > 0 && <> ({pct(final / s.value, final / s.value < 0.1 ? 1 : 0)} of these)</>}
+                {prev ? (
+                  <>
+                    <span className="font-medium text-ink">{fmt(s.value)}</span> kept ({pct(share, share < 0.1 ? 1 : 0)} of{" "}
+                    {fmt(prev.value)})
+                  </>
+                ) : (
+                  "everyone, to start"
+                )}
               </span>
             </p>
             {zoomed && <p className="mt-1 font-semibold uppercase tracking-widest text-accent">zooming in {Math.round(zoomed)}×</p>}
