@@ -2,7 +2,7 @@
 
 import type { Sex } from "@/lib/assumptions";
 import { heightDefault, type Query } from "@/lib/model";
-import { RACES } from "@/lib/types";
+import { RACES, RELIGIONS } from "@/lib/types";
 import CityPicker from "./CityPicker";
 
 const ages = Array.from({ length: 73 }, (_, i) => i + 18);
@@ -139,6 +139,29 @@ export default function QueryForm({
             on={f.races.includes(r)}
             onClick={() =>
               set({ filters: { ...f, races: f.races.includes(r) ? f.races.filter((x) => x !== r) : [...f.races, r] } })
+            }
+          >
+            {label}
+          </Chip>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-sm text-muted">Religion:</span>
+        <Chip on={f.religions.length === 0} onClick={() => set({ filters: { ...f, religions: [] } })}>
+          any
+        </Chip>
+        {RELIGIONS.map((label, r) => (
+          <Chip
+            key={label}
+            on={f.religions.includes(r)}
+            onClick={() =>
+              set({
+                filters: {
+                  ...f,
+                  religions: f.religions.includes(r) ? f.religions.filter((x) => x !== r) : [...f.religions, r],
+                },
+              })
             }
           >
             {label}

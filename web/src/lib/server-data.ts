@@ -2,7 +2,7 @@ import "server-only";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Choice } from "./competition";
-import { mergeContext, type Context, type Global, type Shard } from "./model";
+import { mergeContext, type Context, type Global, type ReligionData, type Shard } from "./model";
 
 const DIR = path.join(process.cwd(), "public", "data");
 
@@ -23,9 +23,11 @@ async function json<T>(file: string): Promise<T> {
 
 // Census tables plus context.json (health rates, per-metro context).
 export function loadGlobal() {
-  return (globalP ??= Promise.all([json<Global>("global.json"), json<Context>("context.json")]).then(([g, c]) =>
-    mergeContext(g, c),
-  ));
+  return (globalP ??= Promise.all([
+    json<Global>("global.json"),
+    json<Context>("context.json"),
+    json<ReligionData>("religion.json"),
+  ]).then(([g, c, r]) => mergeContext(g, c, r)));
 }
 
 export function loadChoice() {

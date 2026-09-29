@@ -8,7 +8,7 @@ import {
   type Source,
 } from "./assumptions";
 import { compete, type Choice, type Competition, type You } from "./competition";
-import { NRACE, NTYPE, RACES, typeIndex, type Typed } from "./types";
+import { NRACE, NREL, NTYPE, RACES, RELIGIONS, typeIndex, type Typed } from "./types";
 
 export type Marg = "nm" | "sep" | "wid" | "div" | "mar";
 type UMarg = Exclude<Marg, "mar">;
@@ -59,6 +59,7 @@ export interface Global {
   // Merged in from context.json.
   health?: HealthNational;
   ctx?: Record<string, MarketCtx>;
+  religion?: ReligionData;
 }
 
 export interface Query {
@@ -75,6 +76,7 @@ export interface Query {
     notWithParents: boolean;
     incomeMin: 0 | 1 | 2 | 3; // income bracket floor: none, $25k+, $60k+, $120k+
     races: number[]; // race/ethnicity codes to include; empty = any
+    religions: number[]; // religion codes to include; empty = any
     nonSmoker: boolean;
     bmiMax: 0 | 25 | 30; // 0 = no BMI filter
   };
@@ -111,6 +113,7 @@ export interface Composition {
   kids: number[]; // no, yes
   parents: number[]; // lives on own, with parents
   race: number[]; // by race/ethnicity code
+  religion: number[]; // by religion code
   smoke: number | null; // estimated share, when health data is available
   obese: number | null;
   over: number | null;
@@ -135,8 +138,16 @@ export interface Context {
   markets: Record<string, MarketCtx>;
 }
 
-export function mergeContext(g: Global, c: Context): Global {
-  return { ...g, health: c.health, ctx: c.markets };
+// Shape of religion.json (see pipeline/religion.py).
+export interface ReligionData {
+  bands: [number, number][];
+  national: Record<"1" | "2", number[][]>; // [band][religion], unmarried adults
+  pairing: Record<string, number[][]>; // log affinity [chooser][candidate]
+  markets: Record<string, number[]>; // log shift of local vs. national shares
+}
+
+export function mergeContext(g: Global, c: Context, r?: ReligionData): Global {
+  return { ...g, health: c.health, ctx: c.markets, religion: r };
 }
 
 export const NCELL = 97;
@@ -254,6 +265,23 @@ function pool(
   const rate = (key: "smoke" | "obese" | "over", a: number) => healthRate(g, key, sex, a, s.id);
   // Health filters: independent of the Census attributes given sex and age.
   const fSmoke = (a: number) => (withFilters && f.nonSmoker ? 1 - (rate("smoke", a) ?? 0) : 1);
+  // Religion mix for this sex and age: national GSS rates shifted by the
+  // metro's (or state's) composition. Independent of everything else.
+  const relMix = (a: number) => {
+    const R = g.religion;
+    if (!R) return null;
+    const i = Math.max(0, R.bands.findIndex(([lo, hi]) => a >= lo && a <= hi));
+    const shift = R.markets[s.id];
+    const v = R.national[sx][i].map((p, r) => p * Math.exp(shift?.[r] ?? 0));
+    const tot = v.reduce((x, y) => x + y, 0);
+    return v.map((x) => x / tot);
+  };
+  const relPicked = withFilters && f.religions.length ? f.religions : null;
+  const fRel = (a: number) => {
+    if (!relPicked) return 1;
+    const m = relMix(a);
+    return m ? relPicked.reduce((t, r) => t + m[r], 0) : 1;
+  };
   const fBmi = (a: number) =>
     withFilters && f.bmiMax ? 1 - (rate(f.bmiMax === 30 ? "obese" : "over", a) ?? 0) : 1;
   const comp: Composition = {
@@ -265,6 +293,7 @@ function pool(
     kids: [0, 0],
     parents: [0, 0],
     race: new Array(NRACE).fill(0),
+    religion: new Array(NREL).fill(0),
     smoke: g.health ? 0 : null,
     obese: g.health ? 0 : null,
     over: g.health ? 0 : null,
@@ -283,11 +312,18 @@ function pool(
     height: acc(),
     smoke: acc(),
     bmi: acc(),
+    religion: acc(),
     orientation: acc(),
     relationship: acc(),
     looking: acc(),
     spark: acc(),
-    typed: { lo, hi, m: new Float64Array((hi - lo + 1) * NTYPE), race: new Float64Array((hi - lo + 1) * NRACE) } as Typed,
+    typed: {
+      lo,
+      hi,
+      m: new Float64Array((hi - lo + 1) * NTYPE),
+      race: new Float64Array((hi - lo + 1) * NRACE),
+      rel: new Float64Array((hi - lo + 1) * NREL),
+    } as Typed,
     race: acc(),
     comp,
     records: 0,
@@ -332,13 +368,15 @@ function pool(
       const fh = (a: number) => (hf ? heightShare(sex, a, q.you.height!, hf) : 1);
       const fs = (a: number) => fh(a) * fSmoke(a);
       const fb = (a: number) => fs(a) * fBmi(a);
-      const fo = (a: number) => fb(a) * (q.model.orientation ? attraction(sex, towards, a) : 1);
+      const fg = (a: number) => fb(a) * fRel(a);
+      const fo = (a: number) => fg(a) * (q.model.orientation ? attraction(sex, towards, a) : 1);
       const fr = (a: number) => fo(a) * (q.model.relationship ? 1 - inRelationship(sex, a) : 1);
       const fl = (a: number) => fr(a) * (q.model.looking ? looking(sex, a) : 1);
       const spark = q.model.spark > 0 ? q.model.spark : 1;
       add(out.height, C, varC, pFinal, n, avg(fh));
       add(out.smoke, C, varC, pFinal, n, avg(fs));
       add(out.bmi, C, varC, pFinal, n, avg(fb));
+      add(out.religion, C, varC, pFinal, n, avg(fg));
       add(out.orientation, C, varC, pFinal, n, avg(fo));
       add(out.relationship, C, varC, pFinal, n, avg(fr));
       add(out.looking, C, varC, pFinal, n, avg(fl));
@@ -354,6 +392,15 @@ function pool(
         for (let r = 0; r < NRACE; r++) {
           out.typed.race[rrow + r] += inPool * rsKept[r];
           comp.race[r] += inPool * rsKept[r];
+        }
+        // Religion among those left: the mix, restricted to your picks.
+        const rm = relMix(a) ?? new Array(NREL).fill(1 / NREL);
+        const kept = relPicked ? rm.map((v, r) => (relPicked.includes(r) ? v : 0)) : rm;
+        const keptSum = kept.reduce((x, y) => x + y, 0) || 1;
+        for (let r = 0; r < NREL; r++) {
+          const v = inPool * raceKept * (kept[r] / keptSum);
+          out.typed.rel[(a - lo) * NREL + r] += v;
+          comp.religion[r] += v;
         }
         // Health shares among those left (zero for anything filtered out).
         const sm = f.nonSmoker && withFilters ? 0 : (rate("smoke", a) ?? 0);
@@ -450,6 +497,11 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   if (q.filters.nonSmoker && g.health)
     push("smoke", "Non-smokers", "smoke", t.smoke, "survey", [SOURCES.nhanes, SOURCES.brfss],
       "Removes current cigarette smokers. National rates for unpartnered adults by sex and age (NHANES 2017-2023), shifted up or down by how this metro (or its state) compares with the US in the 2024 BRFSS. Assumes smoking is unrelated to the Census filters above; it actually falls with education.");
+  if (q.filters.religions.length && g.religion) {
+    const names = [...q.filters.religions].sort().map((r) => RELIGIONS[r]);
+    push("religion", names.join(", "), "other religions (or none)", t.religion, "survey", [SOURCES.gss, SOURCES.religionLocal],
+      "National religious identification of unmarried adults by sex and age (General Social Survey 2016-2024), shifted by how this state or metro differs from the US. Applied as independent of every other filter.");
+  }
   if (q.filters.bmiMax && g.health)
     push("bmi", q.filters.bmiMax === 25 ? "BMI under 25" : "BMI under 30", q.filters.bmiMax === 25 ? "BMI 25 or higher" : "BMI 30 or higher",
       t.bmi, "survey", [SOURCES.nhanes, SOURCES.brfss],
@@ -483,10 +535,12 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
     const filtered =
       f.neverMarried || f.edu > 0 || f.noKids || f.notWithParents || f.incomeMin > 0 || f.nonSmoker || f.bmiMax > 0 ||
       f.races.length > 0 ||
+      f.religions.length > 0 ||
       heightFilter(q) !== null;
     const base = filtered ? pool(s, g, q, T, M, lo, hi, false) : t;
-    const market = compete(choice, base.typed, comp.typed, q, detail);
-    const mine = filtered ? compete(choice, t.typed, comp.typed, q, detail) : market;
+    const relPairing = g.religion?.pairing[`${T}${M}`];
+    const market = compete(choice, base.typed, comp.typed, q, detail, relPairing);
+    const mine = filtered ? compete(choice, t.typed, comp.typed, q, detail, relPairing) : market;
     if (market && mine) {
       const multiplier = market.ratio > 0 ? mine.relative / market.ratio : 0;
       competition = {

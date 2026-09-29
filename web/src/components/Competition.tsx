@@ -4,7 +4,7 @@ import { SOURCES } from "@/lib/assumptions";
 import { incomeWeights, type You } from "@/lib/competition";
 import { noun, type Query, type Result } from "@/lib/model";
 import { approx, fmt, pct } from "@/lib/format";
-import { RACES } from "@/lib/types";
+import { RACES, RELIGIONS } from "@/lib/types";
 
 const EDU = ["No degree", "Bachelor's", "Graduate"];
 const INC = ["Under $25k", "$25–60k", "$60–120k", "$120k+"];
@@ -77,6 +77,59 @@ function IncomeSlider({ value, onChange }: { value: number | undefined; onChange
         <span>$250k+</span>
       </span>
     </label>
+  );
+}
+
+// Chooser group x candidate group appeal (100 = their favorite), your column ringed.
+function PairTable({
+  title,
+  labels,
+  rows,
+  you,
+  note,
+}: {
+  title: string;
+  labels: string[];
+  rows: { share: number; appeal: number[] }[];
+  you?: number;
+  note: string;
+}) {
+  return (
+    <div>
+      <p className="text-sm font-medium">{title}</p>
+      <table className="mt-2 w-full text-[11px]">
+        <thead>
+          <tr className="text-muted">
+            <th className="py-1 text-left font-normal">Theirs</th>
+            {labels.map((e, j) => (
+              <th key={e} className={`py-1 text-right font-normal ${you === j ? "font-semibold text-accent" : ""}`}>
+                {e}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} className="border-t border-rule/60">
+              <td className="py-1.5">
+                {labels[i]} <span className="text-muted">({pct(row.share)})</span>
+              </td>
+              {row.appeal.map((v, j) => (
+                <td key={j} className="py-1.5 text-right tabular-nums">
+                  <span
+                    className={`inline-block min-w-7 rounded px-1 ${you === j ? "ring-1 ring-accent" : ""}`}
+                    style={{ background: `color-mix(in srgb, var(--accent) ${Math.round(v * 45)}%, transparent)` }}
+                  >
+                    {Math.round(v * 100)}
+                  </span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-1 text-[11px] text-muted">{note}</p>
+    </div>
   );
 }
 
@@ -256,6 +309,12 @@ export default function Competition({
           <YouSelect label="Kids at home" value={you.kids} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(kids) => set({ kids })} />
           <YouSelect label="Been married" value={you.prev} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(prev) => set({ prev })} />
           <YouSelect
+            label="Religion"
+            value={you.religion}
+            options={RELIGIONS.map((l, v) => ({ v, label: l }))}
+            onChange={(religion) => set({ religion })}
+          />
+          <YouSelect
             label="Race/ethnicity"
             value={you.race}
             options={RACES.map((l, v) => ({ v, label: l }))}
@@ -317,6 +376,15 @@ export default function Competition({
             </tbody>
           </table>
         </div>
+        {c.prefs.religionRows && (
+          <PairTable
+            title="Religion (who ends up with whom)"
+            labels={RELIGIONS.map((r) => r.replace("Latter-day Saint", "LDS").replace("Other religion", "Other").replace("Not religious", "None"))}
+            rows={c.prefs.religionRows}
+            you={you.religion}
+            note="From married couples under 45 in the General Social Survey, relative to random pairing."
+          />
+        )}
         {c.prefs.raceRows && (
           <div>
             <p className="text-sm font-medium">Race/ethnicity (who ends up with whom)</p>

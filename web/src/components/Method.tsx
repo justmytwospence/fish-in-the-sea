@@ -72,6 +72,13 @@ export default function Method({ dataYear }: { dataYear: string }) {
           segregation, social networks and history as much as anyone&apos;s preferences.
         </p>
         <p>
+          <strong>Religion.</strong> The Census doesn&apos;t ask about religion. The optional filter starts from the
+          religious identification of unmarried adults by sex and age in the <Src s={SOURCES.gss} /> (2016–2024),
+          then shifts it by how the metro or state differs from the US (<Src s={SOURCES.religionLocal} />). It&apos;s
+          applied as independent of everything else. In the competition model, religious pairing comes from married
+          couples under 45 in the GSS, relative to random pairing.
+        </p>
+        <p>
           <strong>Height and health.</strong> Height filters use measured heights by sex and age from{" "}
           <Src s={SOURCES.nhanes} />. Smoking and BMI start from NHANES rates for unpartnered adults by sex and age
           (BMI is measured, not self-reported), then shift up or down by how the metro, or its state where the CDC

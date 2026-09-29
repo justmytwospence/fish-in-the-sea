@@ -90,7 +90,8 @@ export default function App({
       Promise.all([
         fetch("/data/global.json").then((r) => r.json()),
         fetch("/data/context.json").then((r) => r.json()),
-      ]).then(([g, c]) => mergeContext(g, c)),
+        fetch("/data/religion.json").then((r) => r.json()),
+      ]).then(([g, c, r]) => mergeContext(g, c, r)),
       fetch("/data/choice.json").then((r) => r.json()),
     ])).then(setData);
   }, []);

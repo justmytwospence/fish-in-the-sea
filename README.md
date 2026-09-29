@@ -14,6 +14,8 @@ How many people could you actually date? Pick a US metro, your age and sex, and 
 - 2020 tract-to-PUMA relationship file and July 2023 CBSA delineations (to weight PUMAs into metros); 2026 Gazetteer place coordinates (search and geolocation); 2024 cartographic CBSA and state boundaries (map).
 - NHANES 2017-2023: measured height, measured BMI and smoking by sex, age and partnership status.
 - CDC BRFSS 2024 metro (SMART) and state prevalence for smoking and obesity, via data.cdc.gov (datasets j32a-sa6u and dttw-5yxu).
+- General Social Survey 1972-2024 cumulative file (gss7224_r3a.dta from gss.norc.org): religion of unmarried adults by sex and age, and religious pairing of married couples.
+- Pew Research Center Religious Landscape Study 2023-24: religious composition for every state and 34 metros, scraped from the public state and metro pages into `pipeline/raw/pew_rls_2023_24.csv`.
 - 2024 presidential results by county (github.com/tonmcg/US_County_Level_Election_Results_08-24).
 - Survey and literature assumptions (Gallup, NSFG, GSS, HCMST, Pew, Di Nallo on kids, Hitsch et al. on height) live in `web/src/lib/assumptions.ts` with citations.
 
@@ -33,7 +35,7 @@ for f in 2021/DataFiles/DEMO_L 2021/DataFiles/BMX_L 2021/DataFiles/SMQ_L 2017/Da
   curl -A "$UA" -O https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/$f.xpt; done
 curl -L -o pres2024_county.csv https://raw.githubusercontent.com/tonmcg/US_County_Level_Election_Results_08-24/master/2024_US_County_Level_Presidential_Results.csv
 curl -O https://www2.census.gov/programs-surveys/acs/data/pums/2024/5-Year/csv_pus.zip && unzip csv_pus.zip
-duckdb -c "copy (select SERIALNO, SPORDER::INT sporder, STATE::INT st, PUMA::INT puma, PWGTP::INT w, AGEP::INT age, SEX::INT sex, MAR::INT mar, MARHT::INT marht, MARHYP::INT marhyp, RELSHIPP::INT rel, SCHL::INT schl, PAOC::INT paoc, PINCP::INT pincp, ADJINC::BIGINT adjinc, ESR::INT esr from read_csv('psam_pus*.csv', union_by_name=true, types={'SERIALNO':'VARCHAR'})) to 'pums.parquet' (format parquet, compression zstd)"
+duckdb -c "copy (select SERIALNO, SPORDER::INT sporder, STATE::INT st, PUMA::INT puma, PWGTP::INT w, AGEP::INT age, SEX::INT sex, MAR::INT mar, MARHT::INT marht, MARHYP::INT marhyp, RELSHIPP::INT rel, SCHL::INT schl, PAOC::INT paoc, PINCP::INT pincp, ADJINC::BIGINT adjinc, ESR::INT esr, RAC1P::INT rac1p, HISP::INT hisp from read_csv('psam_pus*.csv', union_by_name=true, types={'SERIALNO':'VARCHAR'})) to 'pums.parquet' (format parquet, compression zstd)"
 
 # Map: pre-projected, simplified TopoJSON
 for g in cbsa state; do curl -O https://www2.census.gov/geo/tiger/GENZ2024/shp/cb_2024_us_${g}_20m.zip && unzip -o cb_2024_us_${g}_20m.zip -d shp; done
@@ -41,11 +43,12 @@ npx mapshaper -i shp/cb_2024_us_cbsa_20m.shp name=cbsa -filter 'NAME.indexOf(", 
 npx mapshaper -i shp/cb_2024_us_state_20m.shp name=states -filter 'STATEFP != "72"' -filter-fields STUSPS -proj albersusa -simplify 12% -o states.json format=topojson quantization=10000
 npx mapshaper -i cbsa.json states.json combine-files -o ../../web/public/data/map.json format=topojson bbox
 
-cd .. && uv run python build.py && uv run python choice.py && uv run python context.py
+cd .. && uv run python build.py && uv run python choice.py && uv run python context.py && uv run python religion.py
 ```
 
 - `build.py` writes per-metro counts (ACS scaled to the 2025 estimates) and attribute mixes.
 - `choice.py` fits the revealed-preference model behind the competition section (a conditional logit on recently formed couples versus sampled single alternatives, about a minute).
+- `religion.py` writes national religion rates, religious pairing and per-metro local shifts.
 - `context.py` writes heights, health rates and per-metro context (health shifts, 2024 vote) and pulls BRFSS from data.cdc.gov.
 
 The site is a static snapshot of the data above. To refresh it for a later ACS release, change `YEAR` in `pipeline/build.py`, update the URLs above, rebuild and redeploy.
