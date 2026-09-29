@@ -64,7 +64,7 @@ function SliderRow({
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
       <span className="w-full text-sm text-muted sm:w-36">{label}</span>
       <div className="min-w-0 flex-1 sm:max-w-xs">{children}</div>
-      <span className={`w-28 text-sm tabular-nums ${active ? "font-medium text-ink" : "text-muted"}`}>{shown}</span>
+      <span className={`shrink-0 text-sm tabular-nums sm:w-28 ${active ? "font-medium text-ink" : "text-muted"}`}>{shown}</span>
       {active && (
         <button type="button" onClick={onReset} className="text-xs text-muted underline hover:text-ink">
           any
