@@ -12,6 +12,8 @@ import Verdict from "./Verdict";
 import WhoIsLeft from "./WhoIsLeft";
 import WhatIfs from "./WhatIfs";
 import { whatIfs } from "@/lib/whatif";
+import { overTime, type AgePoint } from "@/lib/overtime";
+import OverTime from "./OverTime";
 import Competition from "./Competition";
 import Leaderboard from "./Leaderboard";
 import Method from "./Method";
@@ -82,6 +84,7 @@ export default function App({
   const [result, setResult] = useState(initialResult);
   const [data, setData] = useState<[Global, Choice] | null>(null);
   const [loosen, setLoosen] = useState<ReturnType<typeof whatIfs> | null>(null);
+  const [timeline, setTimeline] = useState<AgePoint[] | null>(null);
   const reqId = useRef(0);
   const qs = useMemo(() => serializeQuery(query), [query]);
 
@@ -105,6 +108,7 @@ export default function App({
         if (id !== reqId.current) return;
         setResult(compute(s, data[0], query, data[1]));
         setLoosen(whatIfs(s, data[0], query, data[1]));
+        setTimeline(overTime(s, data[0], query, data[1]));
       })
       .catch(() => {});
   }, [query, qs, data]);
@@ -144,6 +148,7 @@ export default function App({
       {loosen && loosen.options.length > 0 && (
         <WhatIfs base={loosen.base} options={loosen.options} onApply={(q) => setQuery(q)} />
       )}
+      {timeline && <OverTime points={timeline} query={query} />}
       <Leaderboard qs={qs} query={query} onPick={(market) => setQuery((q) => ({ ...q, market }))} />
       <Method dataYear={dataYear} />
     </main>
