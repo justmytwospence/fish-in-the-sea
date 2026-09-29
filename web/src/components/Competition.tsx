@@ -1,7 +1,7 @@
 "use client";
 
 import { SOURCES } from "@/lib/assumptions";
-import type { You } from "@/lib/competition";
+import { incomeWeights, type You } from "@/lib/competition";
 import { noun, type Query, type Result } from "@/lib/model";
 import { fmt, pct } from "@/lib/format";
 
@@ -37,6 +37,44 @@ function YouSelect({
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+const INCOME_MAX = 250;
+
+// Income in $1,000s; untouched means "typical for your age".
+function IncomeSlider({ value, onChange }: { value: number | undefined; onChange: (v: number | undefined) => void }) {
+  const shown = value === undefined ? "Typical" : value >= INCOME_MAX ? `$${INCOME_MAX}k+` : `$${value}k`;
+  return (
+    <label className="col-span-2 flex flex-col gap-1 text-sm">
+      <span className="flex items-baseline justify-between">
+        <span className="text-muted">Income</span>
+        <span className="flex items-baseline gap-2">
+          <span className={`font-medium tabular-nums ${value === undefined ? "text-muted" : "text-ink"}`}>{shown}</span>
+          {value !== undefined && (
+            <button type="button" onClick={() => onChange(undefined)} className="text-xs text-muted underline hover:text-ink">
+              reset
+            </button>
+          )}
+        </span>
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={INCOME_MAX}
+        step={5}
+        value={value ?? 50}
+        aria-valuetext={shown}
+        onChange={(e) => onChange(+e.target.value)}
+        className={`accent-[var(--accent)] ${value === undefined ? "opacity-50" : ""}`}
+      />
+      <span className="flex justify-between text-[11px] text-muted">
+        <span>$0</span>
+        <span>$60k</span>
+        <span>$120k</span>
+        <span>$250k+</span>
+      </span>
     </label>
   );
 }
@@ -189,7 +227,7 @@ export default function Competition({
           <p className="text-xs text-muted">Leave anything on &ldquo;Typical&rdquo; to use the typical single {noun(query.me.sex, false)} your age.</p>
           <div className="mt-3 grid grid-cols-2 gap-3">
             <YouSelect label="Education" value={you.edu} options={EDU.map((l, v) => ({ v, label: l }))} onChange={(edu) => set({ edu })} />
-            <YouSelect label="Income" value={you.inc} options={INC.map((l, v) => ({ v, label: l }))} onChange={(inc) => set({ inc })} />
+            <IncomeSlider value={you.income} onChange={(income) => set({ income })} />
             <YouSelect label="Kids at home" value={you.kids} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(kids) => set({ kids })} />
             <YouSelect label="Been married" value={you.prev} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(prev) => set({ prev })} />
             {oppositeSex && (
@@ -249,7 +287,12 @@ export default function Competition({
             </tbody>
           </table>
         </div>
-        <Scale title="Income" levels={INC} values={c.prefs.inc} you={you.inc} />
+        <Scale
+          title="Income"
+          levels={INC}
+          values={c.prefs.inc}
+          you={you.income === undefined ? undefined : incomeWeights(you.income).reduce((b, w, i, ws) => (w > ws[b] ? i : b), 0)}
+        />
         <Scale title="Kids at home" levels={["No kids", "Has kids"]} values={c.prefs.kids} you={you.kids} />
         <Scale title="Marriage history" levels={["Never married", "Been married"]} values={c.prefs.prev} you={you.prev} />
       </div>

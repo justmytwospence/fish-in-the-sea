@@ -33,7 +33,7 @@ export interface Choice {
 
 export interface You {
   edu?: number; // 0 none, 1 BA, 2 graduate
-  inc?: number; // 0 <25k, 1 25-60k, 2 60-120k, 3 120k+
+  income?: number; // annual income in $1,000s
   kids?: number; // kids at home
   prev?: number; // been married before
   height?: number; // inches
@@ -66,6 +66,23 @@ export interface Competition {
 }
 
 type Dim = "edu" | "inc" | "kids" | "prev";
+
+// Income brackets are <25k, 25-60k, 60-120k and 120k+. A specific income is
+// spread over the two brackets whose midpoints it falls between, so appeal
+// moves smoothly with the slider instead of jumping at bracket edges.
+const INC_MID = [12.5, 42.5, 90, 160];
+export function incomeWeights(k: number): number[] {
+  const w = [0, 0, 0, 0];
+  if (k <= INC_MID[0]) w[0] = 1;
+  else if (k >= INC_MID[3]) w[3] = 1;
+  else {
+    const i = INC_MID.findIndex((m) => m > k) - 1;
+    const t = (k - INC_MID[i]) / (INC_MID[i + 1] - INC_MID[i]);
+    w[i] = 1 - t;
+    w[i + 1] = t;
+  }
+  return w;
+}
 const DIMS: Dim[] = ["edu", "inc", "kids", "prev"];
 const LEVELS: Record<Dim, number> = { edu: 3, inc: 4, kids: 2, prev: 2 };
 
@@ -239,16 +256,23 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
   // available people your age.
   const a0 = Math.min(comps.hi, Math.max(comps.lo, q.me.age)) - comps.lo;
   const pYou = new Float64Array(NTYPE);
-  const fits = (t: number) =>
-    DIMS.every((d) => q.you[d] === undefined || q.you[d] === TYPES[t][d]);
+  const incW = q.you.income === undefined ? null : incomeWeights(q.you.income);
+  const fit = (t: number) => {
+    const ty = TYPES[t];
+    if (q.you.edu !== undefined && q.you.edu !== ty.edu) return 0;
+    if (q.you.kids !== undefined && q.you.kids !== ty.kids) return 0;
+    if (q.you.prev !== undefined && q.you.prev !== ty.prev) return 0;
+    return incW ? incW[ty.inc] : 1;
+  };
   let tot = 0;
   for (let y = 0; y < NTYPE; y++) {
-    if (!fits(y)) continue;
-    pYou[y] = comps.m[a0 * NTYPE + y];
+    const f = fit(y);
+    if (!f) continue;
+    pYou[y] = comps.m[a0 * NTYPE + y] * f;
     tot += pYou[y];
   }
   if (tot <= 0) {
-    for (let y = 0; y < NTYPE; y++) pYou[y] = fits(y) ? 1 : 0;
+    for (let y = 0; y < NTYPE; y++) pYou[y] = fit(y);
     tot = pYou.reduce((a, b) => a + b, 0);
   }
   for (let y = 0; y < NTYPE; y++) pYou[y] /= tot;
