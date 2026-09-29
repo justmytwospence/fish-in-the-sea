@@ -16,8 +16,8 @@ const MAX_DOTS = 30000; // everyone, at the start
 const UNITS = [0, 1, 2, 3, 4, 5].flatMap((e) => [1, 2, 2.5, 5].map((m) => m * 10 ** e)).filter((u) => u >= 1 && u % 1 === 0);
 
 const DROP_MS = 650;
-const FADE_MS = 450; // one dot's color change
-const WAVE_MS = 700; // spread of fade start times across the field
+const FADE_MS = 300; // one dot's color change
+const WAVE_MS = 400; // spread of fade start times across the field
 const SHADES = 12; // color buckets between neutral and accent
 const MOVE_MS = 850;
 
@@ -216,23 +216,23 @@ export class SieveEngine {
     this.anim = null;
   }
 
-  // Step forward: the non-keepers fall through and survivors regroup (all
-  // still in color). Then the next step's keepers stay lit as the top block
-  // while the rest fade to neutral in a wave rising from the bottom.
+  // Step forward: the non-keepers fall through; as the survivors regroup,
+  // the next step's keepers stay lit as the top block while the rest fade to
+  // neutral in a wave rising from the bottom.
   transition(keep: number, onDone: () => void) {
     this.cancel();
     const run = (phase: Phase, after: () => void) => {
       this.anim = { start: performance.now(), phase, done: after };
       if (!this.raf) this.raf = requestAnimationFrame(this.loop);
     };
-    const recolor = () => {
+    // Light the next step's keepers and start draining the rest.
+    const drain = () => {
       this.markKeep(keep);
       const now = performance.now();
       const n = this.dots.length;
       this.dots.forEach((d, i) => {
-        if (!d.keep) this.fadeTo(d, 0, now, (1 - i / n) * WAVE_MS + this.rand() * 120);
+        if (!d.keep) this.fadeTo(d, 0, now, (1 - i / n) * WAVE_MS + this.rand() * 80);
       });
-      run("fade", onDone);
     };
     const survivors: Dot[] = [];
     let dropped = 0;
@@ -245,10 +245,14 @@ export class SieveEngine {
       this.fallers.push({ x: d.x, y: d.y, vx: (this.rand() - 0.5) * 40, vy: this.rand() * 120, a: 1, r: this.radius });
     }
     this.dots = survivors;
-    if (!dropped) return recolor();
+    if (!dropped) {
+      drain();
+      return run("fade", onDone);
+    }
     run("drop", () => {
+      drain();
       this.relayout(true);
-      run("move", recolor);
+      run("move", onDone);
     });
   }
 
@@ -280,7 +284,7 @@ export class SieveEngine {
     const a = this.anim;
     let busy = this.fallers.length > 0;
     if (a) {
-      const dur = a.phase === "drop" ? DROP_MS : a.phase === "fade" ? FADE_MS + WAVE_MS + 120 : MOVE_MS;
+      const dur = a.phase === "drop" ? DROP_MS : a.phase === "fade" ? FADE_MS + WAVE_MS + 80 : MOVE_MS;
       const t = Math.min(1, (now - a.start) / dur);
       if (a.phase === "move") {
         const e = ease(t);
