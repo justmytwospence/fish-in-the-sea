@@ -114,10 +114,6 @@ function add(a: Acc, C: number, varC: number, p: number, neff: number, mod: numb
   if (neff > 0 && p < 1) a.variance += (C * mod) ** 2 * (p * (1 - p)) / neff;
 }
 
-function binOf(g: Global, age: number): number {
-  return g.bins.findIndex(([lo, hi]) => age >= lo && age <= hi);
-}
-
 // P(partner age in [lo, hi] | own age, own sex, partner sex)
 export function partnerIn(g: Global, own: Sex, partner: Sex, age: number, lo: number, hi: number) {
   const row = g.partnerCdf[`${own}${partner}`][Math.min(age, g.ageMax) - g.ageMin];

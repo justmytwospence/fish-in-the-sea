@@ -19,3 +19,11 @@ export function pct(x: number, digits = 0): string {
   if (v > 0 && v < 1 && digits === 0) return `${v.toFixed(1)}%`;
   return `${v.toFixed(digits)}%`;
 }
+
+// "Austin-Round Rock-San Marcos, TX" -> "Austin". Metro titles join principal
+// cities with hyphens, so keep the few cities whose own names contain one.
+const HYPHENATED = ["Winston-Salem", "Wilkes-Barre", "Sedro-Woolley"];
+export function shortCity(market: string): string {
+  const first = market.split(",")[0];
+  return HYPHENATED.find((h) => first.startsWith(h)) ?? first.split("-")[0];
+}

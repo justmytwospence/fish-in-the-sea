@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import App from "@/components/App";
 import { compute, noun } from "@/lib/model";
-import { approx } from "@/lib/format";
+import { approx, shortCity } from "@/lib/format";
 import { DEFAULT_MARKET, parseQuery, serializeQuery } from "@/lib/query";
 import { loadGlobal, loadMarkets, loadShard } from "@/lib/server-data";
 
@@ -20,7 +20,7 @@ async function resolve(props: Props) {
 
 export async function generateMetadata(props: Props): Promise<Metadata> {
   const { query, result } = await resolve(props);
-  const title = `${approx(result.final.value)} ${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${result.market.name.split(",")[0]} · The Denominator`;
+  const title = `${approx(result.final.value)} ${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${shortCity(result.market.name)} · The Denominator`;
   const image = `/api/og?${serializeQuery(query)}`;
   return {
     title,
