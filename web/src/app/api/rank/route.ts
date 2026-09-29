@@ -16,9 +16,20 @@ export interface RankResponse {
   total: number;
   you: (RankRow & { rank: Record<Sort, number> }) | null;
   top: Record<Sort, RankRow[]>;
+  // Your metro and the NEIGHBORS on either side of it, with ranks.
+  around: Record<Sort, { rank: number; row: RankRow }[]>;
 }
 
+const NEIGHBORS = 5;
+
 const MIN_POOL = 50;
+
+function neighbors(list: RankRow[], mine: RankRow | undefined) {
+  const i = mine ? list.indexOf(mine) : -1;
+  if (i < 0) return [];
+  const start = Math.max(0, i - NEIGHBORS);
+  return list.slice(start, i + NEIGHBORS + 1).map((row, k) => ({ rank: start + k + 1, row }));
+}
 
 export async function GET(req: Request) {
   const query = parseQuery(new URL(req.url).searchParams);
@@ -52,6 +63,7 @@ export async function GET(req: Request) {
       ? { ...mine, rank: { raw: sorted.raw.indexOf(mine) + 1, fair: sorted.fair.indexOf(mine) + 1 } }
       : null,
     top: { raw: sorted.raw.slice(0, 10), fair: sorted.fair.slice(0, 10) },
+    around: { raw: neighbors(sorted.raw, mine), fair: neighbors(sorted.fair, mine) },
   };
   return Response.json(body, {
     headers: { "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800" },

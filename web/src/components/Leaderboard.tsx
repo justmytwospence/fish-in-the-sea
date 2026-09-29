@@ -30,7 +30,7 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
   useEffect(() => {
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      fetch(`/api/rank?v=2&${qs}`, { signal: ctrl.signal })
+      fetch(`/api/rank?v=3&${qs}`, { signal: ctrl.signal })
         .then((r) => r.json())
         .then(setData)
         .catch(() => {});
@@ -42,7 +42,17 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
   }, [qs]);
 
   const mode = MODES.find((m) => m.key === sort)!;
-  const rows = data?.top[sort] ?? [];
+  // Top 5, then your metro with five neighbors on either side (merged when
+  // they overlap).
+  const TOP = 5;
+  const list: ({ rank: number; row: RankRow } | "gap")[] = [];
+  if (data) {
+    const top = (data.top[sort] ?? []).slice(0, TOP).map((row, i) => ({ rank: i + 1, row }));
+    const around = (data.around?.[sort] ?? []).filter((x) => x.rank > TOP);
+    list.push(...top);
+    if (around.length && around[0].rank > TOP + 1) list.push("gap");
+    list.push(...around);
+  }
 
   return (
     <section aria-label="Other cities" className="mt-16 border-t border-rule pt-10">
@@ -77,10 +87,19 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
       )}
 
       <ol className={`mt-4 divide-y divide-rule transition-opacity ${data ? "" : "opacity-40"}`}>
-        {(rows.length ? rows : Array.from({ length: 10 }, () => null)).map((r, i) => (
-          <li key={r?.id ?? i} className="flex items-baseline justify-between gap-3 py-2">
+        {(list.length ? list : Array.from({ length: 10 }, () => null)).map((item, i) => {
+          if (item === "gap")
+            return (
+              <li key="gap" aria-hidden className="py-1 pl-9 text-muted">
+                ⋯
+              </li>
+            );
+          const r = item?.row ?? null;
+          const mine = r?.id === query.market;
+          return (
+          <li key={r?.id ?? i} className={`flex items-baseline justify-between gap-3 py-2 ${mine ? "-mx-2 rounded bg-accent-soft/60 px-2" : ""}`}>
             <span className="flex items-baseline gap-3">
-              <span className="w-6 text-right text-sm tabular-nums text-muted">{i + 1}</span>
+              <span className="w-8 text-right text-sm tabular-nums text-muted">{item?.rank ?? ""}</span>
               {r ? (
                 <button
                   type="button"
@@ -101,7 +120,8 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
               {r && sort === "fair" && <span className="ml-2 text-xs text-muted">{fmt(r.value)} in pool</span>}
             </span>
           </li>
-        ))}
+          );
+        })}
       </ol>
       <p className="mt-3 text-xs text-muted">
         Metro areas only, same search ({noun(query.seek.sex)} {query.seek.lo}–{query.seek.hi}, same filters, same you).
