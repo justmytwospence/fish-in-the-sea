@@ -11,7 +11,7 @@ How many people could you actually date? Pick a US town, your age and sex, and w
 
 - ACS 2020-2024 5-year summary tables B01003, B01001, B12002 (counts by sex, age and marital status for every metro and micro area, and every county outside one), scaled to the Census Vintage 2025 population estimates (metros by single year of age, counties by five-year group). B14001 (college enrollment) defines college towns.
 - ACS 2020-2024 5-year PUMS: cohabitation, education, own children, living with parents, personal income, single-year age shares, and recently formed couples for the competition model.
-- 2020 tract-to-PUMA relationship file and July 2023 CBSA delineations (to weight PUMAs into metros); 2026 Gazetteer place coordinates (search and geolocation); 2024 cartographic CBSA, county and state boundaries (map).
+- 2020 tract-to-PUMA relationship file and July 2023 CBSA delineations (to weight PUMAs into metros); 2026 Gazetteer place coordinates (search and geolocation).
 - Preset sets in the Elsewhere section: USDA ERS County Typology Codes, 2025 edition (recreation-dependent, retirement destination), and mountain terrain per Kapos et al. (2000) computed in `pipeline/terrain.py` from AWS Terrain Tiles (fetched and cached in `raw/tiles` on first run).
 - NHANES 2017-2023: measured height, measured BMI and smoking by sex, age and partnership status.
 - CDC BRFSS 2024 metro (SMART) and state prevalence for smoking and obesity, via data.cdc.gov (datasets j32a-sa6u and dttw-5yxu).
@@ -40,19 +40,9 @@ for f in 2021/DataFiles/DEMO_L 2021/DataFiles/BMX_L 2021/DataFiles/SMQ_L 2017/Da
 curl -L -o pres2024_county.csv https://raw.githubusercontent.com/tonmcg/US_County_Level_Election_Results_08-24/master/2024_US_County_Level_Presidential_Results.csv
 curl -O https://www2.census.gov/programs-surveys/acs/data/pums/2024/5-Year/csv_pus.zip && unzip csv_pus.zip
 duckdb -c "copy (select SERIALNO, SPORDER::INT sporder, STATE::INT st, PUMA::INT puma, PWGTP::INT w, AGEP::INT age, SEX::INT sex, MAR::INT mar, MARHT::INT marht, MARHYP::INT marhyp, RELSHIPP::INT rel, SCHL::INT schl, PAOC::INT paoc, PINCP::INT pincp, ADJINC::BIGINT adjinc, ESR::INT esr, RAC1P::INT rac1p, HISP::INT hisp from read_csv('psam_pus*.csv', union_by_name=true, types={'SERIALNO':'VARCHAR'})) to 'pums.parquet' (format parquet, compression zstd)"
+for s in Fem Male; do curl -A "$UA" -O https://ftp.cdc.gov/pub/Health_Statistics/NCHS/NSFG/NSFG-2022-2023-${s}RespPUFData.zip && unzip -o NSFG-2022-2023-${s}RespPUFData.zip; done
 
-cd .. && uv run python build.py && cd raw
-
-# Map: pre-projected, simplified TopoJSON. Rural counties (listed by build.py)
-# join the CBSA layer with ids "C" + county FIPS.
-for g in cbsa county state; do curl -O https://www2.census.gov/geo/tiger/GENZ2024/shp/cb_2024_us_${g}_20m.zip && unzip -o cb_2024_us_${g}_20m.zip -d shp; done
-python3 -c "import json; m = json.load(open('../../web/public/data/markets.json'))['markets']; open('shp/rural.csv', 'w').write('GEOID,rural\n' + ''.join(x['county'] + ',1\n' for x in m if 'county' in x))"
-npx mapshaper -i shp/cb_2024_us_county_20m.shp -join shp/rural.csv keys=GEOID,GEOID string-fields=GEOID -filter 'rural === 1' -each 'GEOID = "C" + GEOID' -filter-fields GEOID -o shp/rural.shp
-npx mapshaper -i shp/cb_2024_us_cbsa_20m.shp shp/rural.shp combine-files -filter 'this.layer_name == "rural" || NAME.indexOf(", PR") < 0' -filter-fields GEOID -merge-layers force name=cbsa -proj albersusa -simplify 12% keep-shapes -o cbsa.json format=topojson quantization=10000
-npx mapshaper -i shp/cb_2024_us_state_20m.shp name=states -filter 'STATEFP != "72"' -filter-fields STUSPS -proj albersusa -simplify 12% -o states.json format=topojson quantization=10000
-npx mapshaper -i cbsa.json states.json combine-files -o ../../web/public/data/map.json format=topojson bbox
-
-cd .. && uv run python choice.py && uv run python context.py && uv run python religion.py && uv run python politics.py && uv run python kids.py
+cd .. && uv run python build.py && uv run python choice.py && uv run python context.py && uv run python religion.py && uv run python politics.py && uv run python kids.py
 ```
 
 - `build.py` writes per-market counts (ACS scaled to the 2025 estimates), attribute mixes, preset tags and the place search index.

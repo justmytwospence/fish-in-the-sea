@@ -8,7 +8,6 @@ import { fmt } from "@/lib/format";
 import { loadPlaceIndex, searchPlaces, type Hit, type PlaceIndex } from "@/lib/place-search";
 import { statesOf } from "@/lib/states";
 import MetroChart from "./MetroChart";
-import MetroMap from "./MetroMap";
 
 export type Row = RankResponse["all"][number];
 
@@ -112,13 +111,6 @@ function Src({ s }: { s: { label: string; url: string } }) {
 
 const value = (sort: Sort, r: Row) => (sort === "raw" ? r[2] : sort === "adjusted" ? r[3] : sort === "odds" ? r[4] : r[7]);
 
-function metric(sort: Sort, r: Row) {
-  if (sort === "raw") return fmt(r[2]);
-  if (sort === "adjusted") return fmt(r[3]);
-  if (sort === "odds") return r[4] > 0 ? `×${r[4].toFixed(2)}` : "n/a";
-  return r[7] > 0 ? `${r[7].toFixed(2)} per person` : "n/a";
-}
-
 // Rank rows by the chosen measure (best first); places too small to have
 // odds or crowding go last.
 function rank(rows: Row[], sort: Sort) {
@@ -137,7 +129,50 @@ interface Pin {
 
 const STORE = "fish-in-the-sea:elsewhere";
 const MAX_PINS = 6;
-const TOP = 5;
+const TOP = 5; // leaders highlighted in the chart
+const FIRST = 10; // leaders listed before "show more"
+const MORE = 25;
+
+// Columns of the table; clicking one ranks by it.
+const COLS: { key: Sort; label: string; title: string }[] = [
+  { key: "raw", label: "Raw pool", title: "People through your sieve (bars on a log scale)" },
+  { key: "crowd", label: "Competitors", title: "Competitors in the running per person in your pool (fewer is better)" },
+  { key: "odds", label: "Odds", title: "Adjusted ÷ raw: the market's crowding combined with how you stack up there" },
+  { key: "adjusted", label: "Adjusted", title: "Your pool after adjusting for competition (bars on a log scale)" },
+];
+
+const TAG_LABEL: Record<string, string> = {
+  mountain: "Mountain",
+  resort: "Resort",
+  college: "College town",
+  retire: "Retirement",
+};
+
+// Kind of place from its id and tags (rural county ids end in -c + FIPS).
+function kindOf(r: Row) {
+  if (/-c\d{5}$/.test(r[0])) return "Rural county";
+  return r[8].includes("small") ? "Micro area" : "Metro";
+}
+
+const compact = (n: number) =>
+  n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n));
+
+function cell(key: Sort, r: Row) {
+  if (key === "raw") return fmt(r[2]);
+  if (key === "adjusted") return fmt(r[3]);
+  if (key === "odds") return r[4] > 0 ? `×${r[4].toFixed(2)}` : "n/a";
+  return r[7] > 0 ? r[7].toFixed(2) : "n/a";
+}
+
+// Bar length for the ranking column, relative to the leader in view. Pools
+// span five orders of magnitude, so theirs are on a log scale.
+function barShare(key: Sort, r: Row, best: number) {
+  const v = value(key, r);
+  if (!v || !best) return 0;
+  if (key === "crowd") return best / v;
+  if (key === "odds") return v / best;
+  return best > 1 ? Math.log10(Math.max(1, v)) / Math.log10(best) : 0;
+}
 
 function loadPrefs(): { sort?: Sort; set?: string | null; pins?: Pin[] } {
   try {
@@ -153,6 +188,7 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
   const [states, setStates] = useState<string[]>([]);
   const [set, setSet] = useState<string | null>(null);
   const [pins, setPins] = useState<Pin[]>([]);
+  const [shown, setShown] = useState(FIRST);
   const restored = useRef(false);
 
   // Restore the viewer's last ranking, set and pins (after hydration).
@@ -205,14 +241,14 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
   const mineIdx = rankOf.get(query.market) ?? -1;
   const pinIds = new Set(pins.map((p) => p.market));
 
-  // Top five, then your place and each pinned place with its neighbors, in
-  // rank order with gaps between runs.
+  // The leaders, then your place and each pinned place with its neighbors,
+  // in rank order with gaps between runs.
   const keep = new Set<number>();
-  for (let i = 0; i < Math.min(TOP, ranked.length); i++) keep.add(i);
+  for (let i = 0; i < Math.min(shown, ranked.length); i++) keep.add(i);
   const around = (i: number, k: number) => {
     for (let j = Math.max(0, i - k); j <= Math.min(ranked.length - 1, i + k); j++) keep.add(j);
   };
-  if (mineIdx >= 0) around(mineIdx, pins.length ? 2 : 5);
+  if (mineIdx >= 0) around(mineIdx, pins.length ? 2 : 3);
   for (const p of pins) {
     const i = rankOf.get(p.market);
     if (i !== undefined) around(i, 2);
@@ -225,6 +261,7 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
     prev = i;
   }
   const topIds = new Set(ranked.slice(0, TOP).map((r) => r[0]));
+  const best = ranked.length ? value(sort, ranked[0]) : 0;
   const neighborIds = new Set(mineIdx >= 0 ? ranked.slice(Math.max(0, mineIdx - 5), mineIdx + 6).map((r) => r[0]) : []);
 
   const pick = (id: string) => {
@@ -368,15 +405,110 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
         </p>
       )}
 
-      {all.length ? (
-        <MetroMap rows={all} inView={inView} zoomStates={states} sort={sort} current={query.market} pins={pinIds} onPick={pick} />
-      ) : (
-        <div className="mt-6 aspect-[1.6] w-full rounded-lg bg-rule/20" />
+      <table className={`mt-6 w-full text-sm transition-opacity ${loading ? "opacity-40" : ""}`}>
+        <thead>
+          <tr className="border-b border-rule text-xs text-muted">
+            <th className="w-12 py-2 pr-3 text-right font-normal">#</th>
+            <th className="py-2 text-left font-normal">Place</th>
+            {COLS.map((c) => (
+              <th
+                key={c.key}
+                scope="col"
+                aria-sort={c.key === sort ? (c.key === "crowd" ? "ascending" : "descending") : "none"}
+                className={`py-2 pl-3 text-right font-normal ${c.key === sort || c.key === "adjusted" ? "" : "hidden sm:table-cell"}`}
+              >
+                <button
+                  type="button"
+                  title={c.title}
+                  onClick={() => setSort(c.key)}
+                  className={`hover:text-ink ${c.key === sort ? "font-semibold text-ink" : ""}`}
+                >
+                  {c.label}
+                  {c.key === sort ? (c.key === "crowd" ? " ↑" : " ↓") : ""}
+                </button>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {(list.length ? list : Array.from({ length: FIRST }, () => null)).map((item, i) => {
+            if (item === "gap")
+              return (
+                <tr key={`gap${i}`} aria-hidden>
+                  <td colSpan={6} className="py-1 pl-10 text-muted">
+                    ⋯
+                  </td>
+                </tr>
+              );
+            const r = item?.row ?? null;
+            if (!r)
+              return (
+                <tr key={i} className="border-b border-rule/60">
+                  <td colSpan={6} className="py-3">
+                    <span className="block h-4 w-56 rounded bg-rule/50" />
+                  </td>
+                </tr>
+              );
+            const mine = r[0] === query.market;
+            const pinned = pinIds.has(r[0]);
+            const tags = r[8].filter((t) => TAG_LABEL[t]).map((t) => TAG_LABEL[t]);
+            return (
+              <tr
+                key={r[0]}
+                className={`border-b border-rule/60 align-top ${mine ? "bg-accent-soft/60" : pinned ? "bg-rule/40" : ""}`}
+              >
+                <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-muted">{item!.rank}</td>
+                <td className="py-2">
+                  <button
+                    type="button"
+                    onClick={() => pick(r[0])}
+                    className={`text-left hover:underline ${mine ? "font-semibold text-accent" : pinned ? "font-semibold" : ""}`}
+                  >
+                    {r[1]}
+                  </button>
+                  {mine && <span className="ml-2 text-xs text-accent">you</span>}
+                  <div className="text-xs text-muted">
+                    {[kindOf(r), `${compact(r[6])} people`, ...tags].join(" · ")}
+                  </div>
+                </td>
+                {COLS.map((c) => (
+                  <td
+                    key={c.key}
+                    className={`py-2 pl-3 text-right tabular-nums ${
+                      c.key === sort ? "font-semibold" : c.key === "adjusted" ? "" : "hidden sm:table-cell"
+                    } ${c.key !== sort && c.key !== "adjusted" ? "text-muted" : ""}`}
+                  >
+                    {cell(c.key, r)}
+                    {c.key === sort && (
+                      <span className="ml-auto mt-1 block h-1 w-16 overflow-hidden rounded-full bg-rule/50">
+                        <span
+                          className="block h-full rounded-full bg-accent"
+                          style={{ width: `${Math.min(100, barShare(c.key, r, best) * 100)}%` }}
+                        />
+                      </span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {ranked.length > shown && (
+        <div className="mt-3 flex gap-4 text-sm">
+          <button type="button" onClick={() => setShown(shown + MORE)} className="text-muted underline hover:text-ink">
+            Show {Math.min(MORE, ranked.length - shown)} more
+          </button>
+          <button type="button" onClick={() => setShown(ranked.length)} className="text-muted underline hover:text-ink">
+            Show all {fmt(ranked.length)}
+          </button>
+        </div>
       )}
-      <p className="mt-2 max-w-xl text-xs text-muted">
-        Every metro, micro area and rural county for your exact search. Yours is outlined; places you&apos;re comparing
-        are dashed. Hover for numbers; click to go there.
-      </p>
+      {shown > FIRST && (
+        <button type="button" onClick={() => setShown(FIRST)} className="mt-2 text-sm text-muted underline hover:text-ink">
+          Show fewer
+        </button>
+      )}
 
       {rows.length ? (
         <MetroChart
@@ -392,50 +524,10 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
         Each dot is a place. Across: your raw pool. Up: fewer competitors in the running per person in it (the market
         alone, before how you stack up). Bigger and less crowded is up and to the right. Pool ÷ competitors is the
         adjusted pool for someone of typical appeal, so dots on the same dashed diagonal tie on that; hover for your
-        own adjusted pool, which also counts how you compare with the competition there. Highlighted: you, the places you&apos;re comparing, the five ranked on either side of you and
-        the top five by {mode.by}. Click a dot to go there.
+        own adjusted pool, which also counts how you compare with the competition there. Highlighted: you, the places
+        you&apos;re comparing, the five ranked on either side of you and the top five by {mode.by}. Click a dot to go
+        there.
       </p>
-
-      <ol className={`mt-6 divide-y divide-rule transition-opacity ${loading ? "opacity-40" : ""}`}>
-        {(list.length ? list : Array.from({ length: 10 }, () => null)).map((item, i) => {
-          if (item === "gap")
-            return (
-              <li key={`gap${i}`} aria-hidden className="py-1 pl-11 text-muted">
-                ⋯
-              </li>
-            );
-          const r = item?.row ?? null;
-          const mine = r?.[0] === query.market;
-          const pinned = r ? pinIds.has(r[0]) : false;
-          return (
-            <li
-              key={r?.[0] ?? i}
-              className={`flex items-baseline justify-between gap-3 py-2 ${
-                mine ? "-mx-2 rounded bg-accent-soft/60 px-2" : pinned ? "-mx-2 rounded bg-rule/40 px-2" : ""
-              }`}
-            >
-              <span className="flex items-baseline gap-3">
-                <span className="w-10 shrink-0 text-right text-sm tabular-nums text-muted">{item?.rank ?? ""}</span>
-                {r ? (
-                  <button
-                    type="button"
-                    onClick={() => pick(r[0])}
-                    className={`text-left hover:underline ${mine ? "font-semibold text-accent" : pinned ? "font-semibold" : ""}`}
-                  >
-                    {r[1]}
-                  </button>
-                ) : (
-                  <span className="h-4 w-48 rounded bg-rule/50" />
-                )}
-              </span>
-              <span className="shrink-0 text-right tabular-nums">
-                {r ? metric(sort, r) : ""}
-                {r && sort !== "raw" && <span className="ml-2 text-xs text-muted">of {fmt(r[2])}</span>}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
       <p className="mt-3 text-xs text-muted">
         Same search everywhere ({noun(query.seek.sex)} {query.seek.lo}–{query.seek.hi}, same filters, same you).
         Towns outside metro and micro areas are counted by county. Odds and crowding skip places with fewer than 50
