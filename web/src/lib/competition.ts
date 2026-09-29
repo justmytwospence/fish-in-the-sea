@@ -254,7 +254,14 @@ export function compete(
     // You: as given, or the mix of available people your age.
     const you = youCode !== undefined ? Array.from({ length: n }, (_, k) => (k === youCode ? 1 : 0)) : rsC[a0];
     const youRb = rb.map((row) => row.reduce((a, v, y) => a + v * you[y], 0));
-    const rows = R.map((row, x) => ({ share: rsT.reduce((a, t, i) => a + (Nage[i] / Ntot) * t[x], 0), appeal: row }));
+    // For display: each pairing relative to picking at random from the
+    // competitors actually available here (1 = chance).
+    const avail = new Array(n).fill(0);
+    for (let j = 0; j < nAy; j++) for (let y = 0; y < n; y++) avail[y] += comps[field][j * n + y];
+    const rows = R.map((row, x) => ({
+      share: rsT.reduce((a, t, i) => a + (Nage[i] / Ntot) * t[x], 0),
+      appeal: vsRandom(row, avail),
+    }));
     return { key, n, rsC, rb, kappa, youRb, rows };
   };
   const dims = [
@@ -431,10 +438,12 @@ export function compete(
 
   // Education is mostly about matching: appeal of each candidate level for
   // targets at each level, plus how common each target level is.
+  const eduAvail = [0, 0, 0];
+  for (let j = 0; j < nAy; j++) for (let y = 0; y < NTYPE; y++) eduAvail[TYPES[y].edu] += comps.m[j * NTYPE + y];
   const eduRows = [0, 1, 2].map((xe) => {
     let share = 0;
     for (let x = 0; x < NTYPE; x++) if (TYPES[x].edu === xe) share += Ntype[x] / Ntot;
-    return { share, appeal: L.edu[xe].map((v) => Math.exp(v)) };
+    return { share, appeal: vsRandom(L.edu[xe].map((v) => Math.exp(v)), eduAvail) };
   });
 
   const raceRows = dims.find((d) => d.key === "race")?.rows ?? null;
@@ -490,6 +499,14 @@ export function compete(
       height: heightCurve,
     },
   };
+}
+
+// Appeal of each candidate group relative to a random pick from the
+// available candidates (weights `avail`): 1 means exactly chance.
+function vsRandom(appeal: number[], avail: number[]) {
+  const tot = avail.reduce((a, b) => a + b, 0);
+  const mean = tot > 0 ? appeal.reduce((a, v, k) => a + (v * avail[k]) / tot, 0) : 0;
+  return mean > 0 ? appeal.map((v) => v / mean) : appeal;
 }
 
 function norm(xs: number[]) {

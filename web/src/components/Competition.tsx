@@ -117,10 +117,11 @@ function PairTable({
               {row.appeal.map((v, j) => (
                 <td key={j} className="py-1.5 text-right tabular-nums">
                   <span
-                    className={`inline-block min-w-7 rounded px-1 ${you === j ? "ring-1 ring-accent" : ""}`}
-                    style={{ background: `color-mix(in srgb, var(--accent) ${Math.round(v * 45)}%, transparent)` }}
+                    className={`inline-block min-w-9 rounded px-1 ${you === j ? "ring-1 ring-ink" : ""}`}
+                    style={{ background: pairColor(v) }}
+                    title={`${v.toFixed(2)}× as likely as a random pick`}
                   >
-                    {Math.round(v * 100)}
+                    {fmtTimes(v)}
                   </span>
                 </td>
               ))}
@@ -132,6 +133,15 @@ function PairTable({
     </div>
   );
 }
+
+// Pairing relative to chance: warm above 1, cool below, stronger with distance.
+function pairColor(v: number) {
+  const s = Math.min(1, Math.abs(Math.log2(Math.max(v, 1e-3))) / 3);
+  const token = v >= 1 ? "--warm" : "--cool";
+  return `color-mix(in srgb, var(${token}) ${Math.round(s * 55)}%, transparent)`;
+}
+
+const fmtTimes = (v: number) => (v >= 10 ? `×${Math.round(v)}` : v >= 0.095 ? `×${v.toFixed(v >= 1 ? 1 : 2)}` : "<×0.1");
 
 // A row of dots on a 0-1 appeal scale, one per level, with yours ringed.
 function Scale({ title, levels, values, you }: { title: string; levels: string[]; values: number[]; you?: number }) {
@@ -383,56 +393,31 @@ export default function Competition({
 
       <h3 className="mt-12 font-display text-2xl tracking-tight">What they go for</h3>
       <p className="mt-2 max-w-xl text-sm text-muted">
-        Appeal to {them} like yours, as a share of their favorite (100). Age, education, income and marriage history
-        are revealed preferences: who people like them actually paired up with in the last few years, relative to
-        who was single at the time. Kids and height come from published studies.
+        The curves and dots show appeal to {them} like yours as a share of their favorite (100). The tables show
+        who ends up with whom: how much more (red) or less (blue) likely than a random pick from the {us} available
+        here, so ×1 is pure chance. Age, education, income, marriage history and race are revealed preferences from
+        couples formed in the last few years relative to who was single at the time; religion and politics come from
+        couples in national surveys; kids and height from published studies.
       </p>
       <div className="mt-6 grid gap-8 sm:grid-cols-2">
         <Curve title="Age" xs={c.prefs.ages} ys={c.prefs.age} you={query.me.age} fmtX={(x) => String(Math.round(x))} />
         {c.prefs.heights && c.prefs.height && (
           <Curve title="Height" xs={c.prefs.heights} ys={c.prefs.height} you={you.height} fmtX={inches} />
         )}
-        <div>
-          <p className="text-sm font-medium">Education (mostly, like goes with like)</p>
-          <table className="mt-2 w-full text-xs">
-            <thead>
-              <tr className="text-muted">
-                <th className="py-1 text-left font-normal">Their education</th>
-                {EDU.map((e, j) => (
-                  <th key={e} className={`py-1 text-right font-normal ${you.edu === j ? "font-semibold text-accent" : ""}`}>
-                    {e}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {c.prefs.eduRows.map((row, i) => (
-                <tr key={i} className="border-t border-rule/60">
-                  <td className="py-1.5">
-                    {EDU[i]} <span className="text-muted">({pct(row.share)})</span>
-                  </td>
-                  {row.appeal.map((v, j) => (
-                    <td key={j} className="py-1.5 text-right tabular-nums">
-                      <span
-                        className={`inline-block min-w-9 rounded px-1 ${you.edu === j ? "ring-1 ring-accent" : ""}`}
-                        style={{ background: `color-mix(in srgb, var(--accent) ${Math.round(v * 45)}%, transparent)` }}
-                      >
-                        {Math.round(v * 100)}
-                      </span>
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <PairTable
+          title="Education"
+          labels={["No degree", "Bachelor's", "Graduate"]}
+          rows={c.prefs.eduRows}
+          you={you.edu}
+          note="From couples formed in the last few years in the Census microdata."
+        />
         {c.prefs.politicsRows && (
           <PairTable
             title="Politics (who ends up with whom)"
             labels={["Dem.", "Ind.", "Rep."]}
             rows={c.prefs.politicsRows}
             you={you.politics}
-            note="Party of both partners in Stanford's How Couples Meet and Stay Together 2017, relative to random pairing."
+            note="Party of both partners in Stanford's How Couples Meet and Stay Together 2017."
           />
         )}
         {c.prefs.religionRows && (
@@ -441,47 +426,17 @@ export default function Competition({
             labels={RELIGIONS.map((r) => r.replace("Latter-day Saint", "LDS").replace("Other religion", "Other").replace("Not religious", "None"))}
             rows={c.prefs.religionRows}
             you={you.religion}
-            note="From married couples under 45 in the General Social Survey, relative to random pairing."
+            note="From married couples under 45 in the General Social Survey."
           />
         )}
         {c.prefs.raceRows && (
-          <div>
-            <p className="text-sm font-medium">Race/ethnicity (who ends up with whom)</p>
-            <table className="mt-2 w-full text-[11px]">
-              <thead>
-                <tr className="text-muted">
-                  <th className="py-1 text-left font-normal">Theirs</th>
-                  {RACES.map((e, j) => (
-                    <th key={e} className={`py-1 text-right font-normal ${you.race === j ? "font-semibold text-accent" : ""}`}>
-                      {e.split("/")[0]}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {c.prefs.raceRows.map((row, i) => (
-                  <tr key={i} className="border-t border-rule/60">
-                    <td className="py-1.5">
-                      {RACES[i].split("/")[0]} <span className="text-muted">({pct(row.share)})</span>
-                    </td>
-                    {row.appeal.map((v, j) => (
-                      <td key={j} className="py-1.5 text-right tabular-nums">
-                        <span
-                          className={`inline-block min-w-8 rounded px-1 ${you.race === j ? "ring-1 ring-accent" : ""}`}
-                          style={{ background: `color-mix(in srgb, var(--accent) ${Math.round(v * 45)}%, transparent)` }}
-                        >
-                          {Math.round(v * 100)}
-                        </span>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="mt-1 text-[11px] text-muted">
-              Relative to who was single and available, from couples formed in the last few years.
-            </p>
-          </div>
+          <PairTable
+            title="Race/ethnicity (who ends up with whom)"
+            labels={RACES.map((e) => e.split("/")[0])}
+            rows={c.prefs.raceRows}
+            you={you.race}
+            note="From couples formed in the last few years, relative to who was single at the time."
+          />
         )}
         <Scale
           title="Income"
