@@ -140,7 +140,7 @@ export default function QueryForm({
             [
               ["orientation", "Account for sexual orientation"],
               ["relationship", "Remove people seeing someone"],
-              ["looking", "Remove people who aren't looking"],
+              ["looking", "Remove people who say they aren\u2019t looking (one Pew question; rough)"],
               ["separated", "Count separated people as available"],
             ] as const
           ).map(([k, label]) => (

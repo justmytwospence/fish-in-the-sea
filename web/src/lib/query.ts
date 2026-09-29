@@ -8,7 +8,7 @@ export const DEFAULT_QUERY: Query = {
   me: { sex: 1, age: 36 },
   seek: { sex: 2, lo: 30, hi: 39 },
   filters: { neverMarried: false, edu: 0, noKids: false },
-  model: { separated: false, orientation: true, relationship: true, looking: true, spark: 0 },
+  model: { separated: false, orientation: true, relationship: true, looking: false, spark: 0 },
   you: {},
 };
 
@@ -47,7 +47,7 @@ export function parseQuery(p: Params): Query {
     separated: m.has("sep"),
     orientation: !m.has("-orient"),
     relationship: !m.has("-rel"),
-    looking: !m.has("-look"),
+    looking: m.has("look"),
     spark: Math.max(0, Math.min(100, Number(get(p, "spark") ?? 0) || 0)) / 100,
   };
   // you=e1,i2,k0,p0,h70: education, income bracket, kids, previously married, height
@@ -83,7 +83,7 @@ export function serializeQuery(q: Query): string {
     q.model.separated && "sep",
     !q.model.orientation && "-orient",
     !q.model.relationship && "-rel",
-    !q.model.looking && "-look",
+    q.model.looking && "look",
   ].filter(Boolean);
   if (m.length) p.set("m", m.join(","));
   if (q.model.spark > 0) p.set("spark", String(Math.round(q.model.spark * 100)));

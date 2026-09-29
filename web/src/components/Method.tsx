@@ -51,8 +51,10 @@ export default function Method({ dataYear }: { dataYear: string }) {
             <Src s={SOURCES.hcmst} /> (26–37% of the unpartnered are in a relationship).
           </li>
           <li>
-            Looking: <Src s={SOURCES.pewLooking} />. Under 50, about 57% of singles are looking for a relationship or
-            dates; single men say they&apos;re looking more often than single women.
+            Looking (off by default): <Src s={SOURCES.pewLooking} />. Under 50, about 57% of singles say they&apos;re
+            looking for a relationship or dates. It&apos;s one stated-intent survey question, and plenty of people who
+            aren&apos;t &ldquo;looking&rdquo; would date the right person, so it&apos;s an optional extra rather than
+            part of the default sieve.
           </li>
         </ul>
         <p>
