@@ -1,0 +1,24 @@
+import type { Metadata } from "next";
+import { Fraunces, Inter } from "next/font/google";
+import "./globals.css";
+
+const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  axes: ["opsz", "SOFT"],
+});
+
+export const metadata: Metadata = {
+  title: "The Denominator",
+  description:
+    "How many people could you actually date? A Census-based estimate for every US metro, one sobering step at a time.",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html lang="en" className={`${inter.variable} ${fraunces.variable} antialiased`}>
+      <body className="min-h-screen">{children}</body>
+    </html>
+  );
+}

@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #f5f0e6;
+  --card: #fbf8f2;
+  --ink: #1d1a16;
+  --muted: #6d665b;
+  --rule: #ddd4c4;
+  --accent: #c8412a;
+  --accent-soft: #f0d2c7;
+  --census: #2b2722;
+  --model: #c8412a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #15130f;
+    --card: #1d1a16;
+    --ink: #eee7db;
+    --muted: #a39a8b;
+    --rule: #3a342c;
+    --accent: #ff7556;
+    --accent-soft: #4a261d;
+    --census: #e6dfd2;
+    --model: #ff7556;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-rule: var(--rule);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-census: var(--census);
+  --color-model: var(--model);
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-fraunces);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-feature-settings: "tnum" 1;
+}
+
+.hatch {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--model) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.field {
+  border-bottom: 2px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+  padding: 0 0.1em;
+  outline: none;
+}
+.field:focus-visible {
+  background: var(--accent-soft);
+}
+
+select.field {
+  appearance: none;
+  cursor: pointer;
+}
+
+a {
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}

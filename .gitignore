@@ -1,0 +1,11 @@
+.DS_Store
+.pi/
+pipeline/raw/
+pipeline/.venv/
+pipeline/__pycache__/
+web/node_modules/
+web/.next/
+web/.vercel/
+web/next-env.d.ts
+.vercel
+.claude/worktrees/
