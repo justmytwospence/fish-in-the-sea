@@ -200,11 +200,17 @@ function normCdf(z: number): number {
   return z >= 0 ? (1 + y) / 2 : (1 - y) / 2;
 }
 
-// Share of people of `sex` and `age` no taller ("le") or no shorter ("ge")
-// than `h` inches, treating reported heights as rounded to the inch.
-export function heightShare(sex: Sex, age: number, h: number, dir: "le" | "ge"): number {
+// Height slider bounds (inches); a range touching either end is open there.
+export const HEIGHT_MIN = 54;
+export const HEIGHT_MAX = 84;
+
+// Share of people of `sex` and `age` between `lo` and `hi` inches inclusive,
+// treating heights as rounded to the inch.
+export function heightRangeShare(sex: Sex, age: number, lo: number, hi: number): number {
   const { mean, sd } = heightDist(sex, age);
-  return dir === "le" ? normCdf((h + 0.5 - mean) / sd) : 1 - normCdf((h - 0.5 - mean) / sd);
+  const top = hi >= HEIGHT_MAX ? 1 : normCdf((hi + 0.5 - mean) / sd);
+  const bottom = lo <= HEIGHT_MIN ? 0 : normCdf((lo - 0.5 - mean) / sd);
+  return Math.max(0, top - bottom);
 }
 
 // Relative appeal (log scale) of a candidate's height to a chooser, from the

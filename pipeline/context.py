@@ -93,7 +93,18 @@ for sex in (1, 2):
             vals.append(round(wmean(g[col].values, g.w.values), 4))
         health[key][str(sex)] = vals
     health["n"][str(sex)] = [int(((un.RIAGENDR == sex) & (un.band == b)).sum()) for b in range(len(BANDS))]
-print("health", health)
+# Share with BMI at or above each whole number from 20 to 40 (the BMI
+# slider); 25 and 30 match "over" and "obese" above.
+BMI_CUTS = list(range(20, 41))
+health["bmiCuts"] = BMI_CUTS
+health["bmiAbove"] = {}
+for sex in (1, 2):
+    rows = []
+    for b in range(len(BANDS)):
+        g = un[(un.RIAGENDR == sex) & (un.band == b) & un.BMXBMI.notna()]
+        rows.append([round(wmean((g.BMXBMI.values >= t).astype(float), g.w.values), 4) for t in BMI_CUTS])
+    health["bmiAbove"][str(sex)] = rows
+print("health", {k: v for k, v in health.items() if k != "bmiAbove"})
 
 # ------------------------------------------------------------ BRFSS 2024
 

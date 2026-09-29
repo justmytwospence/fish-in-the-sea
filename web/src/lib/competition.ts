@@ -203,7 +203,7 @@ export function compete(
   const compH = new Float64Array(nAx).fill(1);
   const youH = new Float64Array(nAx).fill(1);
   if (useHeight) {
-    const comp = heightDist(M, q.me.age);
+    const comp = heightDist(M, q.me.age ?? Math.round((comps.lo + comps.hi) / 2));
     const cg = heightGrid(comp.mean, comp.sd);
     for (let i = 0; i < nAx; i++) {
       const td = heightDist(T, targets.lo + i);
@@ -223,14 +223,38 @@ export function compete(
   // couples). For each, R[x][y] is scaled so each target group's favorite
   // candidate group is 1; rb[i][y] is the appeal of group y to targets aged
   // i; kappa[i][j] is the average appeal of competitors aged j to them.
-  const a0 = Math.min(comps.hi, Math.max(comps.lo, q.me.age)) - comps.lo;
+  // Your age: as given, or else that of a typical competitor in the running:
+  // competitor ages weighted by how many there are and how much they appeal
+  // to your targets by age, pooled into five-year groups (each at its
+  // weighted middle age) to keep the rankings fast.
+  const youAges: { j: number; w: number }[] = (() => {
+    if (q.me.age !== undefined) return [{ j: Math.min(comps.hi, Math.max(comps.lo, q.me.age)) - comps.lo, w: 1 }];
+    const groups = new Map<number, { m: number; mj: number }>();
+    let tot = 0;
+    for (let j = 0; j < nAy; j++) {
+      let m = 0;
+      for (let y = 0; y < NTYPE; y++) m += comps.m[j * NTYPE + y];
+      let pull = 0;
+      for (let i = 0; i < nAx; i++) pull += Nage[i] * A[i * nAy + j];
+      m *= pull;
+      if (m <= 0) continue;
+      const k = Math.floor((comps.lo + j) / 5);
+      const gr = groups.get(k) ?? { m: 0, mj: 0 };
+      gr.m += m;
+      gr.mj += m * j;
+      groups.set(k, gr);
+      tot += m;
+    }
+    if (tot <= 0) return [{ j: Math.floor(nAy / 2), w: 1 }];
+    return [...groups.values()].map((gr) => ({ j: Math.round(gr.mj / gr.m), w: gr.m / tot }));
+  })();
   interface Mixed {
     key: "race" | "religion" | "politics";
     n: number;
     rsC: number[][];
     rb: number[][];
     kappa: Float64Array;
-    youRb: number[];
+    youRbAt: (j: number) => number[]; // appeal of you (aged comps.lo + j) by target age
     rows: { share: number; appeal: number[] }[];
   }
   const mixed = (key: Mixed["key"], table: number[][] | undefined, n: number, youCode: number | undefined): Mixed | null => {
@@ -252,8 +276,11 @@ export function compete(
     for (let i = 0; i < nAx; i++)
       for (let j = 0; j < nAy; j++) kappa[i * nAy + j] = rsC[j].reduce((a, v, y) => a + v * rb[i][y], 0);
     // You: as given, or the mix of available people your age.
-    const you = youCode !== undefined ? Array.from({ length: n }, (_, k) => (k === youCode ? 1 : 0)) : rsC[a0];
-    const youRb = rb.map((row) => row.reduce((a, v, y) => a + v * you[y], 0));
+    const fixed = youCode !== undefined ? Array.from({ length: n }, (_, k) => (k === youCode ? 1 : 0)) : null;
+    const youRbAt = (j: number) => {
+      const you = fixed ?? rsC[j];
+      return rb.map((row) => row.reduce((a, v, y) => a + v * you[y], 0));
+    };
     // For display: each pairing relative to picking at random from the
     // competitors actually available here (1 = chance).
     const avail = new Array(n).fill(0);
@@ -262,7 +289,7 @@ export function compete(
       share: rsT.reduce((a, t, i) => a + (Nage[i] / Ntot) * t[x], 0),
       appeal: vsRandom(row, avail),
     }));
-    return { key, n, rsC, rb, kappa, youRb, rows };
+    return { key, n, rsC, rb, kappa, youRbAt, rows };
   };
   const dims = [
     mixed("race", dir.race, NRACE, q.you.race),
@@ -338,8 +365,7 @@ export function compete(
   const Dall = last.D;
 
   // You: specified attributes, with anything unspecified filled in from
-  // available people your age.
-  const pYou = new Float64Array(NTYPE);
+  // available people your age (averaged over ages when yours isn't given).
   const incW = q.you.income === undefined ? null : incomeWeights(q.you.income);
   const fit = (t: number) => {
     const ty = TYPES[t];
@@ -348,34 +374,40 @@ export function compete(
     if (q.you.prev !== undefined && q.you.prev !== ty.prev) return 0;
     return incW ? incW[ty.inc] : 1;
   };
-  let tot = 0;
-  for (let y = 0; y < NTYPE; y++) {
-    const f = fit(y);
-    if (!f) continue;
-    pYou[y] = comps.m[a0 * NTYPE + y] * f;
-    tot += pYou[y];
-  }
-  if (tot <= 0) {
-    for (let y = 0; y < NTYPE; y++) pYou[y] = fit(y);
-    tot = pYou.reduce((a, b) => a + b, 0);
-  }
-  for (let y = 0; y < NTYPE; y++) pYou[y] /= tot;
-
-  const youMixed = (i: number) => dims.reduce((a, d) => a * d.youRb[i], 1);
-
   let score = 0;
   let fairShare = 0;
-  for (let i = 0; i < nAx; i++) {
-    const ageW = A[i * nAy + a0] * (useHeight ? youH[i] : 1) * youMixed(i);
+  for (const { j: a0, w: aw } of youAges) {
+    const pYou = new Float64Array(NTYPE);
+    let tot = 0;
+    for (let y = 0; y < NTYPE; y++) {
+      const f = fit(y);
+      if (!f) continue;
+      pYou[y] = comps.m[a0 * NTYPE + y] * f;
+      tot += pYou[y];
+    }
+    if (tot <= 0) {
+      for (let y = 0; y < NTYPE; y++) pYou[y] = fit(y);
+      tot = pYou.reduce((a, b) => a + b, 0);
+    }
+    for (let y = 0; y < NTYPE; y++) pYou[y] /= tot;
+    // Your type's appeal to each target type (independent of target age).
+    const Q = new Float64Array(NTYPE);
     for (let x = 0; x < NTYPE; x++) {
-      const n = targets.m[i * NTYPE + x];
-      if (n <= 0) continue;
       let w = 0;
       for (let y = 0; y < NTYPE; y++) w += pYou[y] * Pall[x * NTYPE + y];
-      w *= ageW;
-      score += n * w;
-      const d = Dall[i * NTYPE + x];
-      if (d > 0) fairShare += (n * w) / (d + w);
+      Q[x] = w;
+    }
+    const rbs = dims.map((d) => d.youRbAt(a0));
+    for (let i = 0; i < nAx; i++) {
+      const ageW = A[i * nAy + a0] * (useHeight ? youH[i] : 1) * rbs.reduce((a, r) => a * r[i], 1);
+      for (let x = 0; x < NTYPE; x++) {
+        const n = targets.m[i * NTYPE + x];
+        if (n <= 0) continue;
+        const w = Q[x] * ageW;
+        score += aw * n * w;
+        const d = Dall[i * NTYPE + x];
+        if (d > 0) fairShare += (aw * (n * w)) / (d + w);
+      }
     }
   }
   score /= Ntot;

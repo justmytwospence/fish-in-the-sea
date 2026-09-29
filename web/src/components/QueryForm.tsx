@@ -1,7 +1,7 @@
 "use client";
 
-import type { Sex } from "@/lib/assumptions";
-import { heightDefault, type Query } from "@/lib/model";
+import { HEIGHT_MAX, HEIGHT_MIN, type Sex } from "@/lib/assumptions";
+import { heightFilter, type Query } from "@/lib/model";
 import { NPOL, PARTY_PLURAL, RACES, RELIGIONS } from "@/lib/types";
 
 // Kids someday: rule out the ones set on kids or the ones set against them;
@@ -23,6 +23,102 @@ function AgeSelect({ value, onChange, label }: { value: number; onChange: (n: nu
         </option>
       ))}
     </select>
+  );
+}
+
+// Your own age is optional: without it the competition section treats you
+// as a typical competitor and the over-time section waits for it.
+function MyAgeSelect({ value, onChange }: { value: number | undefined; onChange: (n: number | undefined) => void }) {
+  return (
+    <select
+      className={`field ${value === undefined ? "opacity-60" : ""}`}
+      aria-label="Your age (optional)"
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value === "" ? undefined : +e.target.value)}
+    >
+      <option value="">age?</option>
+      {ages.map((a) => (
+        <option key={a} value={a}>
+          {a}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// A filter row with a slider: label, the control, and its current value.
+function SliderRow({
+  label,
+  shown,
+  active,
+  onReset,
+  children,
+}: {
+  label: string;
+  shown: string;
+  active: boolean;
+  onReset: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span className="w-full text-sm text-muted sm:w-36">{label}</span>
+      <div className="min-w-0 flex-1 sm:max-w-xs">{children}</div>
+      <span className={`w-28 text-sm tabular-nums ${active ? "font-medium text-ink" : "text-muted"}`}>{shown}</span>
+      {active && (
+        <button type="button" onClick={onReset} className="text-xs text-muted underline hover:text-ink">
+          any
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Two thumbs over one rail; the span between them is the kept range.
+function DualRange({
+  min,
+  max,
+  lo,
+  hi,
+  label,
+  format,
+  onChange,
+}: {
+  min: number;
+  max: number;
+  lo: number;
+  hi: number;
+  label: string;
+  format: (v: number) => string;
+  onChange: (lo: number, hi: number) => void;
+}) {
+  const pos = (v: number) => ((v - min) / (max - min)) * 100;
+  return (
+    <div className="dual-range">
+      <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-rule" />
+      <div
+        className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-accent"
+        style={{ left: `${pos(lo)}%`, width: `${pos(hi) - pos(lo)}%` }}
+      />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={lo}
+        aria-label={`${label}: shortest`}
+        aria-valuetext={format(lo)}
+        onChange={(e) => onChange(Math.min(+e.target.value, hi), hi)}
+      />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={hi}
+        aria-label={`${label}: tallest`}
+        aria-valuetext={format(hi)}
+        onChange={(e) => onChange(lo, Math.max(+e.target.value, lo))}
+      />
+    </div>
   );
 }
 
@@ -94,12 +190,13 @@ export default function QueryForm({
   const set = (patch: Partial<Query>) => onChange({ ...query, ...patch });
   const f = query.filters;
   const m = query.model;
+  const hr = heightFilter(query);
 
   return (
     <section aria-label="Your search">
       <p className="font-display text-2xl leading-[1.7] sm:text-[1.7rem]">
-        I&apos;m a <AgeSelect label="Your age" value={query.me.age} onChange={(age) => set({ me: { ...query.me, age } })} />
-        -year-old{" "}
+        I&apos;m a <MyAgeSelect value={query.me.age} onChange={(age) => set({ me: { ...query.me, age } })} />
+        {query.me.age !== undefined ? "-year-old " : " "}
         <SexSelect label="Your sex" article value={query.me.sex} onChange={(sex) => set({ me: { ...query.me, sex } })} />
         {query.you.height !== undefined ? ", " : " "}
         <HeightSelect value={query.you.height} onChange={(height) => set({ you: { ...query.you, height } })} />
@@ -133,18 +230,88 @@ export default function QueryForm({
         </Chip>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-sm text-muted">Earning at least:</span>
-        {(["any", "$25k", "$60k", "$120k"] as const).map((label, i) => (
-          <Chip
-            key={label}
-            on={f.incomeMin === i}
-            onClick={() => set({ filters: { ...f, incomeMin: (f.incomeMin === i ? 0 : i) as 0 | 1 | 2 | 3 } })}
+      <SliderRow
+        label="Earning at least"
+        shown={f.incomeMin ? `$${f.incomeMin}k a year` : "any income"}
+        active={f.incomeMin > 0}
+        onReset={() => set({ filters: { ...f, incomeMin: 0 } })}
+      >
+        <input
+          type="range"
+          min={0}
+          max={250}
+          step={5}
+          value={f.incomeMin}
+          aria-label="Earning at least"
+          aria-valuetext={f.incomeMin ? `$${f.incomeMin}k` : "any"}
+          onChange={(e) => set({ filters: { ...f, incomeMin: +e.target.value } })}
+          className="w-full accent-[var(--accent)]"
+        />
+      </SliderRow>
+
+      <SliderRow
+        label="Their height"
+        shown={
+          !hr
+            ? "any height"
+            : hr.lo <= HEIGHT_MIN
+              ? `up to ${ft(hr.hi)}`
+              : hr.hi >= HEIGHT_MAX
+                ? `${ft(hr.lo)} or taller`
+                : `${ft(hr.lo)}–${ft(hr.hi)}`
+        }
+        active={hr !== null}
+        onReset={() => set({ filters: { ...f, height: "any" } })}
+      >
+        <DualRange
+          min={HEIGHT_MIN}
+          max={HEIGHT_MAX}
+          lo={hr?.lo ?? HEIGHT_MIN}
+          hi={hr?.hi ?? HEIGHT_MAX}
+          label="Their height"
+          format={ft}
+          onChange={(lo, hi) =>
+            set({ filters: { ...f, height: lo <= HEIGHT_MIN && hi >= HEIGHT_MAX ? "any" : { lo, hi } } })
+          }
+        />
+      </SliderRow>
+      {query.you.height !== undefined && (
+        <div className="mt-1 flex flex-wrap gap-2 text-xs sm:pl-[9.75rem]">
+          <button
+            type="button"
+            onClick={() => set({ filters: { ...f, height: { lo: HEIGHT_MIN, hi: query.you.height! } } })}
+            className="text-muted underline hover:text-ink"
           >
-            {label}
-          </Chip>
-        ))}
-      </div>
+            no taller than me
+          </button>
+          <button
+            type="button"
+            onClick={() => set({ filters: { ...f, height: { lo: query.you.height!, hi: HEIGHT_MAX } } })}
+            className="text-muted underline hover:text-ink"
+          >
+            at least as tall as me
+          </button>
+        </div>
+      )}
+
+      <SliderRow
+        label="BMI under"
+        shown={f.bmiMax ? `BMI under ${f.bmiMax}` : "any BMI"}
+        active={f.bmiMax > 0}
+        onReset={() => set({ filters: { ...f, bmiMax: 0 } })}
+      >
+        <input
+          type="range"
+          min={20}
+          max={41}
+          step={1}
+          value={f.bmiMax || 41}
+          aria-label="BMI under"
+          aria-valuetext={f.bmiMax ? `under ${f.bmiMax}` : "any"}
+          onChange={(e) => set({ filters: { ...f, bmiMax: +e.target.value > 40 ? 0 : +e.target.value } })}
+          className="w-full accent-[var(--accent)]"
+        />
+      </SliderRow>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="mr-1 text-sm text-muted">Race/ethnicity:</span>
@@ -241,43 +408,6 @@ export default function QueryForm({
         })}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-sm text-muted">BMI:</span>
-        {(
-          [
-            [0, "any"],
-            [30, "under 30"],
-            [25, "under 25"],
-          ] as const
-        ).map(([v, label]) => (
-          <Chip key={v} on={f.bmiMax === v} onClick={() => set({ filters: { ...f, bmiMax: f.bmiMax === v ? 0 : v } })}>
-            {label}
-          </Chip>
-        ))}
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-sm text-muted">Their height:</span>
-        {query.you.height === undefined ? (
-          <span className="text-sm text-muted">pick your height above to filter by it</span>
-        ) : (
-          (
-            [
-              ["le", `no taller than ${ft(query.you.height)}`],
-              ["ge", `at least ${ft(query.you.height)}`],
-              ["any", "doesn't matter"],
-            ] as const
-          ).map(([dir, label]) => (
-            <Chip
-              key={dir}
-              on={(f.height ?? heightDefault(query)) === dir}
-              onClick={() => set({ filters: { ...f, height: dir === heightDefault(query) ? undefined : dir } })}
-            >
-              {label}
-            </Chip>
-          ))
-        )}
-      </div>
 
       <details className="group mt-4 text-sm">
         <summary className="cursor-pointer select-none text-muted hover:text-ink">

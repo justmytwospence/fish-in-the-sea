@@ -19,8 +19,10 @@ const MAX_AGE = 90;
 // your own cohort.
 export function overTime(s: Shard, g: Global, q: Query, choice: Choice, slide = true, span = 5): AgePoint[] {
   const out: AgePoint[] = [];
+  const me = q.me.age;
+  if (me === undefined) return out;
   for (let d = -span; d <= span; d++) {
-    const age = q.me.age + d;
+    const age = me + d;
     if (age < MIN_AGE || age > MAX_AGE) continue;
     const shift = slide ? d : 0;
     const lo = Math.max(MIN_AGE, q.seek.lo + shift);

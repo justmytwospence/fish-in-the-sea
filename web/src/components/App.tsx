@@ -154,9 +154,9 @@ export default function App({
   // Replay the sieve only when the funnel itself changes, not when you edit
   // your own attributes in the competition section.
   const sieveKey = useMemo(() => {
-    const { you: _you, ...rest } = query;
+    const { you: _you, me, ...rest } = query;
     void _you;
-    return JSON.stringify(rest);
+    return JSON.stringify({ ...rest, sex: me.sex });
   }, [query]);
 
   return (
@@ -182,7 +182,14 @@ export default function App({
       {loosen && loosen.options.length > 0 && (
         <WhatIfs base={loosen.base} options={loosen.options} onApply={(q) => setQuery(q)} />
       )}
-      {timeline && <OverTime sliding={timeline.sliding} fixed={timeline.fixed} query={query} />}
+      {timeline && query.me.age !== undefined && timeline.sliding.length > 0 ? (
+        <OverTime sliding={timeline.sliding} fixed={timeline.fixed} query={query} />
+      ) : (
+        <section aria-label="Over time" className="mt-16 border-t border-rule pt-10">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Over time</p>
+          <p className="mt-3 max-w-xl text-muted">Add your age at the top to see how your prospects change as you get older.</p>
+        </section>
+      )}
       <Leaderboard qs={qs} query={query} onPick={(market) => setQuery((q) => ({ ...q, market }))} />
       <Method dataYear={dataYear} />
     </main>

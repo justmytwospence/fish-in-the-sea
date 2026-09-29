@@ -26,7 +26,7 @@ export async function GET(req: Request) {
             {fmt(r.final.value)}
           </div>
           <div style={{ fontSize: 36, marginTop: 24, lineHeight: 1.25 }}>
-            {`${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${city} who might date a ${query.me.age}-year-old ${noun(query.me.sex, false)}.`}
+            {`${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${city} who might date a ${query.me.age !== undefined ? `${query.me.age}-year-old ` : ""}${noun(query.me.sex, false)}.`}
           </div>
           <div style={{ fontSize: 26, marginTop: "auto", color: MUTED }}>
             {`≈${fmt(r.competition?.adjusted ?? 0)} after competition · Census ACS 2020–24`}

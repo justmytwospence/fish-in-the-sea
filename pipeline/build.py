@@ -511,8 +511,33 @@ print(f"  mountain: {sum('mountain' in e['tags'] for e in index)}")
 (OUT / "markets.json").write_text(json.dumps(
     dict(year=f"ACS 2020-{YEAR} 5-year, scaled to {PEP_VINTAGE}", markets=index, places=plist),
     separators=(",", ":")))
+# Income slider: the attribute cells only know four brackets (floors $0,
+# $25k, $60k, $120k), so a floor inside a bracket keeps the share of that
+# bracket at or above it, from national microdata for available singles by
+# sex and age bin. incomeAbove[sex][bin][k] is for a floor of incomeCuts[k].
+INC_EDGES = [0, 25, 60, 120]
+INC_CUTS = list(range(0, 255, 5))
+inc = con.execute(f"""
+  select sex, bin, coalesce(pincp, 0) * adjinc / 1e9 k, w from p where {avail} and bin >= 0
+""").df()
+income_above = {}
+for sex in (1, 2):
+    rows = []
+    for b in range(len(BINS)):
+        g = inc[(inc.sex == sex) & (inc.bin == b)]
+        row = []
+        for t in INC_CUTS:
+            br = max(i for i, e in enumerate(INC_EDGES) if t >= e)
+            hi = INC_EDGES[br + 1] if br + 1 < len(INC_EDGES) else math.inf
+            inb = g[(g.k >= INC_EDGES[br]) & (g.k < hi)]
+            tot = inb.w.sum()
+            row.append(round(float(inb.w[inb.k >= t].sum() / tot), 4) if tot > 0 else 1.0)
+        rows.append(row)
+    income_above[str(sex)] = rows
+
 (OUT / "global.json").write_text(json.dumps(
     dict(bins=BINS, marg=MARG, ageMin=AGE_MIN, ageMax=AGE_MAX,
-         ageShares=age_shares, partnerCdf=cdfs), separators=(",", ":")))
+         ageShares=age_shares, partnerCdf=cdfs, incomeCuts=INC_CUTS, incomeAbove=income_above),
+    separators=(",", ":")))
 (ROOT / "market_counties.json").write_text(json.dumps({m["id"]: m["counties"] for m in markets}))
 print(f"  wrote {len(index)} markets, {len(plist)} places")

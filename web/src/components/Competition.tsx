@@ -356,7 +356,8 @@ export default function Competition({
 
       <div className="mt-8">
         <p className="text-sm font-medium">About you</p>
-        <p className="text-xs text-muted">Leave anything on &ldquo;Typical&rdquo; to use the typical single {noun(query.me.sex, false)} your age.</p>
+        <p className="text-xs text-muted">Leave anything on &ldquo;Typical&rdquo; to use the typical single {noun(query.me.sex, false)} your age
+          {query.me.age === undefined ? " (with no age given at the top, a typical competitor in the running)" : ""}.</p>
         <div className="mt-3 grid max-w-xl grid-cols-2 gap-3">
           <YouSelect label="Education" value={you.edu} options={EDU.map((l, v) => ({ v, label: l }))} onChange={(edu) => set({ edu })} />
           <IncomeSlider value={you.income} onChange={(income) => set({ income })} />

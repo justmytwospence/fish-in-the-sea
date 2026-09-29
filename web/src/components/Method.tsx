@@ -38,7 +38,8 @@ export default function Method({ dataYear }: { dataYear: string }) {
           microdata areas that overlap each metro. Small metros borrow strength from
           their Census division. Measuring these jointly, instead of multiplying separate percentages, keeps real
           correlations: unmarried 35-year-olds are more likely to have a degree and less likely to have kids than
-          35-year-olds overall.
+          35-year-olds overall. The microdata carry income in four brackets (under $25k, $25k–60k, $60k–120k,
+          $120k+); an income floor inside a bracket keeps the national share of that bracket above it, by sex and age.
         </p>
         <p>
           <strong>The survey steps</strong> are national, by age and sex, and applied as multipliers, so treat
@@ -97,9 +98,10 @@ export default function Method({ dataYear }: { dataYear: string }) {
           want kids. The unsure (about 4%) are never ruled out. It&apos;s national, and intentions change.
         </p>
         <p>
-          <strong>Height and health.</strong> Height filters use measured heights by sex and age from{" "}
+          <strong>Height and health.</strong> The height range uses measured heights by sex and age from{" "}
           <Src s={SOURCES.nhanes} />. Smoking and BMI start from NHANES rates for unpartnered adults by sex and age
-          (BMI is measured, not self-reported), then shift up or down by how the metro, or its state where the CDC
+          (BMI is measured, not self-reported; the slider uses the share at or above each whole-number BMI), then
+          shift up or down by how the metro, or its state where the CDC
           doesn&apos;t survey the metro, compares with the US in the <Src s={SOURCES.brfss} />. They&apos;re treated as
           independent of the Census filters, which overstates the pool slightly when you combine them (smoking falls
           with education, for example). The 2024 vote in the context card sums county results from{" "}
