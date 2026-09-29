@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { noun, type Query, type Result } from "@/lib/model";
 import { fmt, pct, shortCity } from "@/lib/format";
+import { RACES } from "@/lib/types";
 
 // Ordinal ramp from the accent hue: lightest = first level.
 const RAMP = [22, 45, 70, 100];
@@ -114,6 +115,24 @@ export default function WhoIsLeft({ result, query, dataYear }: { result: Result;
           values={[c.marital.nm, c.marital.div, c.marital.wid, c.marital.sep]}
         />
         <Stack title="Kids at home" labels={["No kids", "Has kids"]} values={c.kids} />
+        <div>
+          <p className="text-sm font-medium">Race/ethnicity</p>
+          <ul className="mt-2 space-y-1 text-xs">
+            {RACES.map((label, r) => {
+              const tot = c.race.reduce((a, b) => a + b, 0) || 1;
+              const v = c.race[r] / tot;
+              return (
+                <li key={label} className="flex items-center gap-2" title={`${label}: ${pct(v)}`}>
+                  <span className="w-28 shrink-0 text-muted">{label}</span>
+                  <span className="h-2 flex-1 overflow-hidden rounded-[4px] bg-rule/40">
+                    <span className="block h-full rounded-[4px] bg-accent" style={{ width: `${v * 100}%` }} />
+                  </span>
+                  <span className="w-10 text-right tabular-nums">{pct(v)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
         <Stack title="Living situation" labels={["On their own or with others", "With parents"]} values={c.parents} />
         {c.smoke !== null && c.obese !== null && c.over !== null && (
           <div>

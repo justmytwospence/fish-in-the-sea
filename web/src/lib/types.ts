@@ -18,4 +18,10 @@ export interface Typed {
   lo: number;
   hi: number;
   m: Float64Array; // (age - lo) * NTYPE + type
+  race: Float64Array; // (age - lo) * NRACE + race, same people as m
 }
+
+// Race/ethnicity: 0 White, 1 Black, 2 Hispanic (any race), 3 Asian,
+// 4 other or multiracial (non-Hispanic unless noted).
+export const NRACE = 5;
+export const RACES = ["White", "Black", "Hispanic", "Asian", "Other/multiracial"];

@@ -15,7 +15,7 @@
 
 import { heightDist, heightLogAppeal, KIDS_LOG, type Sex } from "./assumptions";
 import type { Query } from "./model";
-import { NTYPE, typeOf, type Typed } from "./types";
+import { NRACE, NTYPE, typeOf, type Typed } from "./types";
 
 export interface ChoiceDir {
   n: number;
@@ -23,6 +23,7 @@ export interface ChoiceDir {
   edu: number[][];
   inc: number[][];
   prev: number[][];
+  race?: number[][]; // chooser race x candidate race
 }
 
 export interface Choice {
@@ -37,6 +38,7 @@ export interface You {
   kids?: number; // kids at home
   prev?: number; // been married before
   height?: number; // inches
+  race?: number; // see RACES in types.ts
 }
 
 export interface CompStep {
@@ -63,6 +65,7 @@ export interface Competition {
     age: number[];
     edu: number[];
     eduRows: { share: number; appeal: number[] }[];
+    raceRows: { share: number; appeal: number[] }[] | null;
     inc: number[];
     kids: number[];
     prev: number[];
@@ -203,8 +206,30 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
     }
   }
 
+  // Race/ethnicity pairing (revealed preference, like education), applied
+  // through each age's race mix of targets and competitors. R[xr][yr] is
+  // scaled so each target race's favorite candidate race is 1.
+  const useRace = !!dir.race;
+  const R = (dir.race ?? Array.from({ length: NRACE }, () => new Array(NRACE).fill(0))).map((row) => {
+    const mx = Math.max(...row);
+    return row.map((v) => Math.exp(v - mx));
+  });
+  const mix = (t: Typed, i: number) => {
+    const row = t.race.subarray(i * NRACE, (i + 1) * NRACE);
+    const sum = row.reduce((a, b) => a + b, 0);
+    return Array.from(row, (v) => (sum > 0 ? v / sum : 1 / NRACE));
+  };
+  const rsT = Array.from({ length: nAx }, (_, i) => mix(targets, i));
+  const rsC = Array.from({ length: nAy }, (_, j) => mix(comps, j));
+  // rb[i][yr]: appeal of a candidate of race yr to the targets aged i.
+  const rb = rsT.map((t) => Array.from({ length: NRACE }, (_, yr) => t.reduce((a, v, xr) => a + v * R[xr][yr], 0)));
+  // kappa[i][j]: average race appeal of competitors aged j to targets aged i.
+  const kappa = new Float64Array(nAx * nAy);
+  for (let i = 0; i < nAx; i++)
+    for (let j = 0; j < nAy; j++) kappa[i * nAy + j] = rsC[j].reduce((a, v, yr) => a + v * rb[i][yr], 0);
+
   // Effective competitors for a given set of non-age dimensions.
-  const pull = (P: Float64Array | null, withHeight: boolean) => {
+  const pull = (P: Float64Array | null, withHeight: boolean, withRace = false) => {
     const G = new Float64Array(nAy * NTYPE);
     for (let j = 0; j < nAy; j++) {
       const off = j * NTYPE;
@@ -226,7 +251,7 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
       const h = withHeight ? compH[i] : 1;
       for (let x = 0; x < NTYPE; x++) {
         let s = 0;
-        for (let j = 0; j < nAy; j++) s += A[i * nAy + j] * G[j * NTYPE + x];
+        for (let j = 0; j < nAy; j++) s += A[i * nAy + j] * (withRace ? kappa[i * nAy + j] : 1) * G[j * NTYPE + x];
         D[i * NTYPE + x] = s * h;
         E += targets.m[i * NTYPE + x] * s * h;
       }
@@ -247,14 +272,14 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
   };
   const used: Dim[] = [];
   const Pall = phi(L, DIMS);
-  const last = pull(Pall, useHeight);
+  const last = pull(Pall, useHeight, useRace);
   if (detail) {
     for (const d of DIMS) {
       used.push(d);
-      const r = d === "prev" && !useHeight ? last : pull(phi(L, used), false);
-      steps.push({ key: d, label: labels[d], value: r.E });
+      steps.push({ key: d, label: labels[d], value: pull(phi(L, used), false).E });
     }
-    if (useHeight) steps.push({ key: "height", label: "…and height", value: last.E });
+    if (useHeight) steps.push({ key: "height", label: "…and height", value: pull(Pall, true).E });
+    if (useRace) steps.push({ key: "race", label: "…and race/ethnicity", value: last.E });
   }
   const Dall = last.D;
 
@@ -283,10 +308,14 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
   }
   for (let y = 0; y < NTYPE; y++) pYou[y] /= tot;
 
+  // Your race: as given, or the mix of available people your age.
+  const youRace = q.you.race !== undefined ? Array.from({ length: NRACE }, (_, r) => (r === q.you.race ? 1 : 0)) : rsC[a0];
+  const youRb = rb.map((row) => row.reduce((a, v, yr) => a + v * youRace[yr], 0));
+
   let score = 0;
   let fairShare = 0;
   for (let i = 0; i < nAx; i++) {
-    const ageW = A[i * nAy + a0] * (useHeight ? youH[i] : 1);
+    const ageW = A[i * nAy + a0] * (useHeight ? youH[i] : 1) * (useRace ? youRb[i] : 1);
     for (let x = 0; x < NTYPE; x++) {
       const n = targets.m[i * NTYPE + x];
       if (n <= 0) continue;
@@ -319,13 +348,17 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
   let sumW2 = 0;
   for (let j = 0; j < nAy; j++)
     for (let y = 0; y < NTYPE; y++) {
-      const m = comps.m[j * NTYPE + y];
-      if (m <= 0) continue;
-      let s = 0;
-      for (let i = 0; i < nAx; i++) s += A[i * nAy + j] * compH[i] * H[i * NTYPE + y];
-      sumW += m * s;
-      sumW2 += m * s * s;
-      if (s < score) below += m * s;
+      const m0 = comps.m[j * NTYPE + y];
+      if (m0 <= 0) continue;
+      for (let yr = 0; yr < (useRace ? NRACE : 1); yr++) {
+        const m = useRace ? m0 * rsC[j][yr] : m0;
+        if (m <= 0) continue;
+        let s = 0;
+        for (let i = 0; i < nAx; i++) s += A[i * nAy + j] * compH[i] * H[i * NTYPE + y] * (useRace ? rb[i][yr] : 1);
+        sumW += m * s;
+        sumW2 += m * s * s;
+        if (s < score) below += m * s;
+      }
     }
   const typical = sumW > 0 ? sumW2 / sumW : 0;
   const inRunning = sumW2 > 0 ? (sumW * sumW) / sumW2 : 0;
@@ -340,6 +373,10 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
     for (let x = 0; x < NTYPE; x++) if (TYPES[x].edu === xe) share += Ntype[x] / Ntot;
     return { share, appeal: L.edu[xe].map((v) => Math.exp(v)) };
   });
+
+  const raceRows = useRace
+    ? R.map((row, xr) => ({ share: rsT.reduce((a, t, i) => a + (Nage[i] / Ntot) * t[xr], 0), appeal: row }))
+    : null;
 
   // Preference profiles for display.
   const ages: number[] = [];
@@ -380,6 +417,7 @@ export function compete(c: Choice, targets: Typed, comps: Typed, q: Query, detai
       age: norm(ageCurve),
       edu: level("edu"),
       eduRows,
+      raceRows,
       inc: level("inc"),
       kids: level("kids"),
       prev: level("prev"),

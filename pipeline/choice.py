@@ -72,7 +72,7 @@ def table_features(xv, yv, nx, ny):
 # new couple when they are coded as stepchildren or are older than the union,
 # so they are badly undercounted relative to singles (about 2% vs 11-41%).
 # The kids effect comes from the literature instead (assumptions.ts).
-DIMS = [("edu", 3), ("inc", 4), ("prev", 2)]
+DIMS = [("edu", 3), ("inc", 4), ("prev", 2), ("race", 5)]
 
 
 def features(x, y):
@@ -98,6 +98,7 @@ select p.*, cast(substr(SERIALNO,1,4) as int) yr,
   case when coalesce(pincp, 0) * adjinc / 1e6 >= 120000 then 3
        when coalesce(pincp, 0) * adjinc / 1e6 >= 60000 then 2
        when coalesce(pincp, 0) * adjinc / 1e6 >= 25000 then 1 else 0 end as inc,
+  case when hisp <> 1 then 2 when rac1p = 1 then 0 when rac1p = 2 then 1 when rac1p = 6 then 3 else 4 end as race,
   case
     when sex = 2 then case when paoc in (1,2,3) then 1 else 0 end
     when rel in (20,21,23) and hh.has_hh_kid = 1 then 1
@@ -109,7 +110,7 @@ where age >= 18
 
 # Pool of alternatives: unpartnered, non-institutional adults.
 singles = con.execute("""
-  select st, sex, age, edu, inc, kids_now kids,
+  select st, sex, age, edu, inc, race, kids_now kids,
          case when mar in (2,3,4) then 1 else 0 end prev, w
   from p where mar <> 1 and cohab = 0 and rel <> 37 and age <= 85
 """).df()
@@ -119,7 +120,7 @@ singles = con.execute("""
 # about a year in. Children count as pre-existing only if older than the union.
 couples = con.execute("""
 with c as (
-  select SERIALNO, rel, age, sex, edu, inc, w, st, mar, marht, marhyp, yr,
+  select SERIALNO, rel, age, sex, edu, inc, race, w, st, mar, marht, marhyp, yr,
          case when rel in (21,23) then yr - marhyp else 1 end dur
   from p where rel in (20,21,22,23,24)
 ),
@@ -133,10 +134,10 @@ k as (
 )
 select
   h.st, h.w,
-  h.sex hs, h.age - s.dur ha, h.edu he, h.inc hi,
+  h.sex hs, h.age - s.dur ha, h.edu he, h.inc hi, h.race hr,
   case when s.rel in (21,23) then (h.marht > 1)::int else (h.mar in (2,3,4))::int end hp,
   case when k.oldest_own > s.dur + 1 and k.oldest_own < 18 + s.dur then 1 else 0 end hk,
-  s.sex ss, s.age - s.dur sa, s.edu se, s.inc si,
+  s.sex ss, s.age - s.dur sa, s.edu se, s.inc si, s.race sr,
   case when s.rel in (21,23) then (s.marht > 1)::int else (s.mar in (2,3,4))::int end sp,
   case when k.oldest_step < 18 + s.dur then 1 else 0 end sk
 from h join s using (SERIALNO) left join k using (SERIALNO)
@@ -152,6 +153,7 @@ for (st, sex), g in singles.groupby(["st", "sex"]):
 
 def side(df, pre):
     return {"age": df[pre + "a"].values, "edu": df[pre + "e"].values, "inc": df[pre + "i"].values,
+            "race": df[pre + "r"].values,
             "kids": df[pre + "k"].values, "prev": df[pre + "p"].values, "sex": df[pre + "s"].values}
 
 
@@ -177,7 +179,7 @@ def build(cs, ps):
 
 def sample_alternatives(x, st, ps, cs):
     n = len(st)
-    alt = {k: np.zeros((n, K), np.int32) for k in ("age", "edu", "inc", "kids", "prev")}
+    alt = {k: np.zeros((n, K), np.int32) for k in ("age", "edu", "inc", "kids", "prev", "race")}
     for s in np.unique(st):
         pool = by_state.get((s, ps))
         mask = st == s

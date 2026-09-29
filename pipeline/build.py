@@ -181,6 +181,9 @@ select p.*, st*100000 + puma as stpuma,
        when coalesce(pincp, 0) * adjinc / 1e6 >= 60000 then 2
        when coalesce(pincp, 0) * adjinc / 1e6 >= 25000 then 1 else 0 end as inc,
   case when rel in (25,26,27) then 1 else 0 end as par,
+  -- Race/ethnicity: 0 White, 1 Black, 2 Hispanic (any race), 3 Asian,
+  -- 4 other or multiracial (non-Hispanic unless noted).
+  case when hisp <> 1 then 2 when rac1p = 1 then 0 when rac1p = 2 then 1 when rac1p = 6 then 3 else 4 end as race,
   case {' '.join(f"when age between {lo} and {hi} then {i}" for i, (lo, hi) in enumerate(BINS))}
        else -1 end as bin
 from '{PQ}' p join hh using (SERIALNO)
@@ -198,11 +201,11 @@ CELL = "case when inst = 1 then 96 else (((cohab*3 + edu)*2 + kids)*2 + par)*4 +
 NCELL = 97
 
 
-def dist(df: pd.DataFrame, keys: list[str]) -> dict:
+def dist(df: pd.DataFrame, keys: list[str], ncell: int | None = None) -> dict:
     """Pivot weighted cell sums to {key tuple: (proportions[NCELL], n_eff)}."""
     out = {}
     for k, g in df.groupby(keys):
-        w = np.zeros(NCELL)
+        w = np.zeros(ncell or NCELL)
         w[g.cell.values] = g.w.values
         sw, sw2 = g.w.sum(), g.w2.sum()
         if sw <= 0:
@@ -222,6 +225,22 @@ mkt = con.execute(f"""
   select market, sex, bin, marg, {CELL} cell, sum(w*f) w, sum(w*w*f*f) w2
   from p join pw using (stpuma) where {unmarried} group by all""").df()
 mktd = dist(mkt, ["market", "sex", "bin", "marg"])
+
+# Race/ethnicity mix of available singles (not cohabiting, not in an
+# institution), by sex x age bin x marital status. Kept separate from the
+# attribute cells above to keep shards small, so it is applied as independent
+# of education, kids, living situation and income.
+NRACE = 5
+avail = f"{unmarried} and cohab = 0 and inst = 0"
+nat_r = dist(con.execute(f"""
+  select sex, bin, marg, race cell, sum(w) w, sum(w*w) w2 from p
+  where {avail} group by all""").df(), ["sex", "bin", "marg"], NRACE)
+div_r = dist(con.execute(f"""
+  select division, sex, bin, marg, race cell, sum(w) w, sum(w*w) w2 from p join stdiv using (st)
+  where {avail} group by all""").df(), ["division", "sex", "bin", "marg"], NRACE)
+mkt_r = dist(con.execute(f"""
+  select market, sex, bin, marg, race cell, sum(w*f) w, sum(w*w*f*f) w2
+  from p join pw using (stpuma) where {avail} group by all""").df(), ["market", "sex", "bin", "marg"], NRACE)
 
 
 def shrink(child, parent, k=SHRINK_K):
@@ -330,11 +349,11 @@ for m in markets:
                  pop=int(pe.m.sum() + pe.f.sum()) if pe is not None else m["pop"],
                  sexPop={"1": int(pe.m.sum()) if pe is not None else int(b01.at[geo, "B01001_E002"]),
                          "2": int(pe.f.sum()) if pe is not None else int(b01.at[geo, "B01001_E026"])},
-                 counts={}, moe={}, attrs={}, neff={})
+                 counts={}, moe={}, attrs={}, neff={}, race={})
     for sex in (1, 2):
         s = str(sex)
         shard["counts"][s], shard["moe"][s] = {}, {}
-        shard["attrs"][s], shard["neff"][s] = {}, {}
+        shard["attrs"][s], shard["neff"][s], shard["race"][s] = {}, {}, {}
         # 2025 / ACS factor per age bin for this sex.
         factor = []
         for i, (lo, hi) in enumerate(BINS):
@@ -358,6 +377,13 @@ for m in markets:
                 N.append(round(n))
             shard["attrs"][s][mg] = A
             shard["neff"][s][mg] = N
+            R = []
+            for i in range(len(BINS)):
+                nat_ri = nat_r.get((sex, i, mi), (np.full(NRACE, 1 / NRACE), 0))
+                parent = shrink(div_r.get((d, sex, i, mi)), nat_ri, k=5)
+                pr, _ = shrink(mkt_r.get((m["id"], sex, i, mi)), parent)
+                R.append([round(float(x), 4) for x in pr])
+            shard["race"][s][mg] = R
     (OUT / "m" / f"{m['id']}.json").write_text(json.dumps(shard, separators=(",", ":")))
     index.append(dict(id=m["id"], name=m["name"], kind=m["kind"], pop=shard["pop"], cbsa=m.get("cbsa")))
 

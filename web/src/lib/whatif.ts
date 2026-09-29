@@ -37,6 +37,7 @@ export function whatIfs(s: Shard, g: Global, q: Query, choice: Choice): { base: 
       label: f.incomeMin === 1 ? "Drop the income floor" : `Lower the income floor to ${INCOME[f.incomeMin - 1]}`,
       query: withF({ incomeMin: (f.incomeMin - 1) as 0 | 1 | 2 }),
     });
+  if (f.races.length) cands.push({ key: "race", label: "Drop the race/ethnicity filter", query: withF({ races: [] }) });
   if (f.nonSmoker) cands.push({ key: "smoke", label: "Accept smokers", query: withF({ nonSmoker: false }) });
   if (f.bmiMax === 25) cands.push({ key: "bmi", label: "Loosen BMI to under 30", query: withF({ bmiMax: 30 }) });
   if (f.bmiMax === 30) cands.push({ key: "bmi", label: "Drop the BMI filter", query: withF({ bmiMax: 0 }) });

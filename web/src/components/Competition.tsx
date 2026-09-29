@@ -4,6 +4,7 @@ import { SOURCES } from "@/lib/assumptions";
 import { incomeWeights, type You } from "@/lib/competition";
 import { noun, type Query, type Result } from "@/lib/model";
 import { approx, fmt, pct } from "@/lib/format";
+import { RACES } from "@/lib/types";
 
 const EDU = ["No degree", "Bachelor's", "Graduate"];
 const INC = ["Under $25k", "$25–60k", "$60–120k", "$120k+"];
@@ -254,6 +255,12 @@ export default function Competition({
           <IncomeSlider value={you.income} onChange={(income) => set({ income })} />
           <YouSelect label="Kids at home" value={you.kids} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(kids) => set({ kids })} />
           <YouSelect label="Been married" value={you.prev} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(prev) => set({ prev })} />
+          <YouSelect
+            label="Race/ethnicity"
+            value={you.race}
+            options={RACES.map((l, v) => ({ v, label: l }))}
+            onChange={(race) => set({ race })}
+          />
           {oppositeSex && (
             <YouSelect
               label="Height"
@@ -310,6 +317,45 @@ export default function Competition({
             </tbody>
           </table>
         </div>
+        {c.prefs.raceRows && (
+          <div>
+            <p className="text-sm font-medium">Race/ethnicity (who ends up with whom)</p>
+            <table className="mt-2 w-full text-[11px]">
+              <thead>
+                <tr className="text-muted">
+                  <th className="py-1 text-left font-normal">Theirs</th>
+                  {RACES.map((e, j) => (
+                    <th key={e} className={`py-1 text-right font-normal ${you.race === j ? "font-semibold text-accent" : ""}`}>
+                      {e.split("/")[0]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {c.prefs.raceRows.map((row, i) => (
+                  <tr key={i} className="border-t border-rule/60">
+                    <td className="py-1.5">
+                      {RACES[i].split("/")[0]} <span className="text-muted">({pct(row.share)})</span>
+                    </td>
+                    {row.appeal.map((v, j) => (
+                      <td key={j} className="py-1.5 text-right tabular-nums">
+                        <span
+                          className={`inline-block min-w-8 rounded px-1 ${you.race === j ? "ring-1 ring-accent" : ""}`}
+                          style={{ background: `color-mix(in srgb, var(--accent) ${Math.round(v * 45)}%, transparent)` }}
+                        >
+                          {Math.round(v * 100)}
+                        </span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1 text-[11px] text-muted">
+              Relative to who was single and available, from couples formed in the last few years.
+            </p>
+          </div>
+        )}
         <Scale
           title="Income"
           levels={INC}

@@ -8,7 +8,7 @@ import {
   type Source,
 } from "./assumptions";
 import { compete, type Choice, type Competition, type You } from "./competition";
-import { NTYPE, typeIndex, type Typed } from "./types";
+import { NRACE, NTYPE, RACES, typeIndex, type Typed } from "./types";
 
 export type Marg = "nm" | "sep" | "wid" | "div" | "mar";
 type UMarg = Exclude<Marg, "mar">;
@@ -27,6 +27,9 @@ export interface Shard {
   // 2 graduate; parents = lives with them; income <25k / 25-60k / 60-120k /
   // 120k+); 96 is institutional group quarters.
   attrs: Record<"1" | "2", Record<UMarg, number[][]>>;
+  // Per unmarried group and age bin: race/ethnicity mix of available singles
+  // (see types.ts for the order). Applied independently of attrs.
+  race?: Record<"1" | "2", Record<UMarg, number[][]>>;
   neff: Record<"1" | "2", Record<UMarg, number[]>>;
 }
 
@@ -71,6 +74,7 @@ export interface Query {
     height?: "le" | "ge" | "any";
     notWithParents: boolean;
     incomeMin: 0 | 1 | 2 | 3; // income bracket floor: none, $25k+, $60k+, $120k+
+    races: number[]; // race/ethnicity codes to include; empty = any
     nonSmoker: boolean;
     bmiMax: 0 | 25 | 30; // 0 = no BMI filter
   };
@@ -106,6 +110,7 @@ export interface Composition {
   marital: Record<"nm" | "div" | "wid" | "sep", number>;
   kids: number[]; // no, yes
   parents: number[]; // lives on own, with parents
+  race: number[]; // by race/ethnicity code
   smoke: number | null; // estimated share, when health data is available
   obese: number | null;
   over: number | null;
@@ -259,6 +264,7 @@ function pool(
     marital: { nm: 0, div: 0, wid: 0, sep: 0 },
     kids: [0, 0],
     parents: [0, 0],
+    race: new Array(NRACE).fill(0),
     smoke: g.health ? 0 : null,
     obese: g.health ? 0 : null,
     over: g.health ? 0 : null,
@@ -281,7 +287,8 @@ function pool(
     relationship: acc(),
     looking: acc(),
     spark: acc(),
-    typed: { lo, hi, m: new Float64Array((hi - lo + 1) * NTYPE) } as Typed,
+    typed: { lo, hi, m: new Float64Array((hi - lo + 1) * NTYPE), race: new Float64Array((hi - lo + 1) * NRACE) } as Typed,
+    race: acc(),
     comp,
     records: 0,
   };
@@ -308,8 +315,15 @@ function pool(
       add(out.edu, C, varC, sumMask(p, masks.edu), n, 1);
       add(out.kids, C, varC, sumMask(p, masks.kids), n, 1);
       add(out.parents, C, varC, sumMask(p, masks.parents), n, 1);
-      const pFinal = sumMask(p, masks.income);
-      add(out.income, C, varC, pFinal, n, 1);
+      const pIncome = sumMask(p, masks.income);
+      add(out.income, C, varC, pIncome, n, 1);
+      // Race/ethnicity: this group's mix, restricted to the races you picked.
+      const rs = s.race?.[sx]?.[mg]?.[b] ?? new Array(NRACE).fill(1 / NRACE);
+      const picked = withFilters && f.races.length ? f.races : null;
+      const rsKept = rs.map((v, r) => (!picked || picked.includes(r) ? v : 0));
+      const raceKept = picked ? rsKept.reduce((a, v) => a + v, 0) : 1;
+      const pFinal = pIncome * raceKept;
+      add(out.race, C, varC, pFinal, n, 1);
       records += n * pFinal * S;
 
       // Survey-based factors vary by single year of age: average them over
@@ -333,8 +347,14 @@ function pool(
       const prev = mg === "nm" ? 0 : 1;
       const base = s.counts[sx][mg][b];
       ages.forEach((a, i) => {
-        const w = base * sh[i] * fl(a);
+        const w = base * sh[i] * fl(a) * raceKept;
         const row = (a - lo) * NTYPE;
+        const rrow = (a - lo) * NRACE;
+        const inPool = base * sh[i] * fl(a) * pIncome;
+        for (let r = 0; r < NRACE; r++) {
+          out.typed.race[rrow + r] += inPool * rsKept[r];
+          comp.race[r] += inPool * rsKept[r];
+        }
         // Health shares among those left (zero for anything filtered out).
         const sm = f.nonSmoker && withFilters ? 0 : (rate("smoke", a) ?? 0);
         const obRaw = rate("obese", a) ?? 0;
@@ -410,6 +430,11 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   if (q.filters.notWithParents)
     push("parents", "Not living with their parents", "living with their parents", t.parents, "microdata", [SOURCES.pums],
       "Removes adult children of the householder: people living in a parent's (or step-parent's) home. Roommates and people whose parents live with them count as independent.");
+  if (q.filters.races.length) {
+    const names = [...q.filters.races].sort().map((r) => RACES[r]);
+    push("race", `${names.join(", ")}`, "other races and ethnicities", t.race, "microdata", [SOURCES.pums],
+      "Race and ethnicity mix of available singles of this sex, age and marital status in this metro (Hispanic of any race; other groups non-Hispanic). Applied as independent of the education, kids, living-situation and income filters, which it isn't quite.");
+  }
   if (q.filters.incomeMin > 0)
     push("income", `Earning ${["", "$25k", "$60k", "$120k"][q.filters.incomeMin]}+`, "earning less",
       t.income, "microdata", [SOURCES.pums],
@@ -457,6 +482,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
     const f = q.filters;
     const filtered =
       f.neverMarried || f.edu > 0 || f.noKids || f.notWithParents || f.incomeMin > 0 || f.nonSmoker || f.bmiMax > 0 ||
+      f.races.length > 0 ||
       heightFilter(q) !== null;
     const base = filtered ? pool(s, g, q, T, M, lo, hi, false) : t;
     const market = compete(choice, base.typed, comp.typed, q, detail);

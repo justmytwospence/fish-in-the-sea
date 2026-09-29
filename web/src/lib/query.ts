@@ -7,7 +7,16 @@ export const DEFAULT_QUERY: Query = {
   market: DEFAULT_MARKET,
   me: { sex: 1, age: 36 },
   seek: { sex: 2, lo: 30, hi: 39 },
-  filters: { neverMarried: false, edu: 0, noKids: false, notWithParents: false, incomeMin: 0, nonSmoker: false, bmiMax: 0 },
+  filters: {
+    neverMarried: false,
+    edu: 0,
+    noKids: false,
+    notWithParents: false,
+    incomeMin: 0,
+    nonSmoker: false,
+    bmiMax: 0,
+    races: [],
+  },
   model: { separated: false, orientation: true, relationship: true, looking: false, spark: 0 },
   you: {},
 };
@@ -45,6 +54,7 @@ export function parseQuery(p: Params): Query {
     incomeMin: f.has("inc120") ? 3 : f.has("inc60") ? 2 : f.has("inc25") ? 1 : 0,
     nonSmoker: f.has("nosmoke"),
     bmiMax: f.has("bmi25") ? 25 : f.has("bmi30") ? 30 : 0,
+    races: [0, 1, 2, 3, 4].filter((r) => f.has(`race${r}`)),
   };
   const m = new Set((get(p, "m") ?? "").split(",").filter(Boolean));
   q.model = {
@@ -57,7 +67,7 @@ export function parseQuery(p: Params): Query {
   // you=e1,i85,k0,p0,h70: education, income ($k), kids, previously married, height
   q.you = {};
   for (const part of (get(p, "you") ?? "").split(",")) {
-    const m2 = part.match(/^([eikph])(\d{1,3})$/);
+    const m2 = part.match(/^([eikphr])(\d{1,3})$/);
     if (!m2) continue;
     const v = +m2[2];
     if (m2[1] === "e" && v <= 2) q.you.edu = v;
@@ -65,6 +75,7 @@ export function parseQuery(p: Params): Query {
     if (m2[1] === "k" && v <= 1) q.you.kids = v;
     if (m2[1] === "p" && v <= 1) q.you.prev = v;
     if (m2[1] === "h" && v >= 54 && v <= 84) q.you.height = v;
+    if (m2[1] === "r" && v <= 4) q.you.race = v;
   }
   return q;
 }
@@ -85,6 +96,7 @@ export function serializeQuery(q: Query): string {
     q.filters.incomeMin > 0 && `inc${[0, 25, 60, 120][q.filters.incomeMin]}`,
     q.filters.nonSmoker && "nosmoke",
     q.filters.bmiMax > 0 && `bmi${q.filters.bmiMax}`,
+    ...[...q.filters.races].sort().map((r) => `race${r}`),
   ].filter(Boolean);
   if (f.length) p.set("f", f.join(","));
   const m = [
@@ -102,6 +114,7 @@ export function serializeQuery(q: Query): string {
     y.kids !== undefined && `k${y.kids}`,
     y.prev !== undefined && `p${y.prev}`,
     y.height !== undefined && `h${y.height}`,
+    y.race !== undefined && `r${y.race}`,
   ].filter(Boolean);
   if (you.length) p.set("you", you.join(","));
   return p.toString().replace(/%2C/g, ",");

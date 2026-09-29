@@ -64,6 +64,14 @@ export default function Method({ dataYear }: { dataYear: string }) {
           </li>
         </ul>
         <p>
+          <strong>Race and ethnicity.</strong> The optional filter uses each metro&apos;s race and ethnicity mix of
+          available singles by sex, age and marital status from the <Src s={SOURCES.pums} /> (Hispanic of any race;
+          the other groups non-Hispanic), applied independently of the education, kids, living-situation and income
+          filters. In the competition model, race pairing is a revealed preference like education: how often recent
+          couples paired across groups relative to who was single and available. Those patterns reflect
+          segregation, social networks and history as much as anyone&apos;s preferences.
+        </p>
+        <p>
           <strong>Height and health.</strong> Height filters use measured heights by sex and age from{" "}
           <Src s={SOURCES.nhanes} />. Smoking and BMI start from NHANES rates for unpartnered adults by sex and age
           (BMI is measured, not self-reported), then shift up or down by how the metro, or its state where the CDC
