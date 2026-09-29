@@ -389,9 +389,10 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
         />
       ) : null}
       <p className="mt-2 max-w-xl text-xs text-muted">
-        Each dot is a place. Across: your raw pool. Up: the competition multiplier (above ×1, less competition than a
-        balanced market; below, more). Adjusted pool is the two multiplied, so dots on the same dashed curve have the
-        same adjusted pool. Highlighted: you, the places you&apos;re comparing, the five ranked on either side of you and
+        Each dot is a place. Across: your raw pool. Up: fewer competitors in the running per person in it (the market
+        alone, before how you stack up). Bigger and less crowded is up and to the right. Pool ÷ competitors is the
+        adjusted pool for someone of typical appeal, so dots on the same dashed diagonal tie on that; hover for your
+        own adjusted pool, which also counts how you compare with the competition there. Highlighted: you, the places you&apos;re comparing, the five ranked on either side of you and
         the top five by {mode.by}. Click a dot to go there.
       </p>
 

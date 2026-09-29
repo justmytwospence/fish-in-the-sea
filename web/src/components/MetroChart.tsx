@@ -8,10 +8,13 @@ type Row = RankResponse["all"][number];
 
 const M = { top: 16, right: 16, bottom: 44, left: 48 };
 
-// Every place as a dot: raw pool across (log), the competition multiplier up
-// (x1 is a balanced market). Adjusted pool = raw x multiplier, so the faint
-// curves are constant adjusted pools. Yours, its ranking neighbors, pinned
-// places and the leaders are emphasized; everything else stays recessive.
+// Every place as a dot: raw pool across, competitors in the running per person
+// up (both log; fewer competitors is higher, so better is up and to the
+// right). Pool / competitors is the adjusted pool for someone of typical
+// appeal, so the faint diagonals are constant typical adjusted pools; your own
+// appeal moves you off them (see the tooltip). Yours, its ranking neighbors,
+// pinned places and the leaders are emphasized; everything else stays
+// recessive.
 export default function MetroChart({
   rows: input,
   topIds,
@@ -38,24 +41,25 @@ export default function MetroChart({
   }, []);
 
   const h = Math.round(Math.min(420, Math.max(300, w * 0.62)));
-  const rows = useMemo(() => input.filter((r) => r[2] >= 1 && r[4] > 0), [input]);
+  const rows = useMemo(() => input.filter((r) => r[2] >= 1 && r[7] > 0), [input]);
 
   const lx0 = Math.floor(Math.log10(Math.max(1, Math.min(...rows.map((r) => r[2])))));
   const lx1 = Math.max(lx0 + 1, Math.ceil(Math.log10(Math.max(...rows.map((r) => r[2])))));
-  const yMax = Math.max(1.2, ...rows.map((r) => r[4])) * 1.06;
+  // Competitors per person, log scale, fewest at the top; always show 1.
+  const ys = rows.map((r) => r[7]);
+  const yLo = Math.min(0.9, ...ys) / 1.08;
+  const yHi = Math.max(1.1, ...ys) * 1.08;
   const px = (v: number) => M.left + ((Math.log10(v) - lx0) / (lx1 - lx0)) * (w - M.left - M.right);
-  const py = (v: number) => h - M.bottom - (v / yMax) * (h - M.top - M.bottom);
+  const py = (v: number) =>
+    M.top + ((Math.log10(v) - Math.log10(yLo)) / (Math.log10(yHi) - Math.log10(yLo))) * (h - M.top - M.bottom);
   const xTicks = Array.from({ length: lx1 - lx0 + 1 }, (_, i) => 10 ** (lx0 + i));
-  const yTicks = Array.from({ length: Math.floor(yMax / 0.25) + 1 }, (_, i) => i * 0.25);
-  // Curves of constant adjusted pool: multiplier = A / raw.
-  const isos = xTicks.slice(1, -1).map((A) => {
-    const pts: string[] = [];
-    for (let t = 0; t <= 60; t++) {
-      const x = 10 ** (lx0 + ((lx1 - lx0) * t) / 60);
-      const y = A / x;
-      if (y <= yMax && y >= 0.05) pts.push(`${px(x).toFixed(1)},${py(y).toFixed(1)}`);
-    }
-    return { A, d: pts.length > 1 ? `M${pts.join("L")}` : "" };
+  const yTicks = [0.1, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2, 3, 5, 10, 20].filter((t) => t >= yLo && t <= yHi);
+  // Lines of constant typical adjusted pool: competitors = raw / A.
+  const isos = xTicks.slice(1).map((A) => {
+    const x0 = Math.max(10 ** lx0, A * yLo);
+    const x1 = Math.min(10 ** lx1, A * yHi);
+    const d = x1 > x0 ? `M${px(x0).toFixed(1)},${py(x0 / A).toFixed(1)}L${px(x1).toFixed(1)},${py(x1 / A).toFixed(1)}` : "";
+    return { A, d, lx: x0 };
   });
 
   // Draw order: background dots, then neighbors, then leaders and pinned
@@ -76,7 +80,7 @@ export default function MetroChart({
     const tw = text.length * 6.6;
     const x0 = right ? x + 10 : x - 10 - tw;
     for (const dy of [0, -13, 13]) {
-      const y0 = py(r[4]) + dy - 9;
+      const y0 = py(r[7]) + dy - 9;
       const hit = boxes.some(([a, b, c, d]) => x0 < c && x0 + tw > a && y0 < d && y0 + 13 > b);
       if (!hit) {
         boxes.push([x0, y0, x0 + tw, y0 + 13]);
@@ -88,7 +92,7 @@ export default function MetroChart({
 
   return (
     <div ref={ref} className="relative mt-6">
-      <svg width={w} height={h} role="img" aria-label="Every place by raw pool and competition multiplier" className="block">
+      <svg width={w} height={h} role="img" aria-label="Every place by raw pool and competitors per person" className="block">
         {yTicks.map((t) => (
           <g key={`y${t}`}>
             <line
@@ -101,23 +105,25 @@ export default function MetroChart({
               opacity={t === 1 ? 1 : 0.5}
             />
             <text x={M.left - 8} y={py(t) + 4} textAnchor="end" className="fill-muted text-[11px] tabular-nums">
-              ×{t}
+              {t}
             </text>
           </g>
         ))}
         <text x={w - M.right} y={py(1) - 6} textAnchor="end" className="fill-muted text-[11px]">
-          balanced market
+          one competitor per person
         </text>
-        {isos.map(({ A, d }) => (
-          <g key={`iso${A}`}>
-            <path d={d} fill="none" className="stroke-rule" strokeDasharray="3 4" strokeWidth={1} />
-            {A / (yMax * 0.93) > 10 ** lx0 && (
-              <text x={px(A / (yMax * 0.93)) + 4} y={py(yMax * 0.93)} className="fill-muted text-[10px]">
-                {fmt(A)} adjusted
-              </text>
-            )}
-          </g>
-        ))}
+        {isos.map(({ A, d, lx }) =>
+          d ? (
+            <g key={`iso${A}`}>
+              <path d={d} fill="none" className="stroke-rule" strokeDasharray="3 4" strokeWidth={1} />
+              {lx === A * yLo && px(lx) + 80 < w - M.right && (
+                <text x={px(lx) + 4} y={M.top + 10} className="fill-muted text-[10px]">
+                  {fmt(A)} typical adjusted
+                </text>
+              )}
+            </g>
+          ) : null,
+        )}
         {xTicks.map((t) => (
           <text key={`x${t}`} x={px(t)} y={h - M.bottom + 18} textAnchor="middle" className="fill-muted text-[11px] tabular-nums">
             {fmt(t)}
@@ -127,13 +133,13 @@ export default function MetroChart({
           Raw pool (log scale) →
         </text>
         <text transform={`translate(12 ${(M.top + h - M.bottom) / 2}) rotate(-90)`} textAnchor="middle" className="fill-muted text-[11px]">
-          Competition multiplier →
+          Fewer competitors per person →
         </text>
 
         {ordered.map((r) => {
           const L = layer(r);
           const x = px(r[2]);
-          const y = py(r[4]);
+          const y = py(r[7]);
           return (
             <g
               key={r[0]}
@@ -161,7 +167,7 @@ export default function MetroChart({
             <text
               key={`l${r[0]}`}
               x={x + (right ? 10 : -10)}
-              y={py(r[4]) + 4 + dy}
+              y={py(r[7]) + 4 + dy}
               textAnchor={right ? "start" : "end"}
               className={`pointer-events-none text-[12px] ${r[0] === current ? "fill-accent font-semibold" : "fill-ink"}`}
               style={{ paintOrder: "stroke", stroke: "var(--card)", strokeWidth: 3 }}
@@ -176,7 +182,7 @@ export default function MetroChart({
           className="pointer-events-none absolute z-10 w-52 rounded-md border border-rule bg-card p-2 text-xs shadow-md"
           style={{
             left: Math.min(w - 216, Math.max(0, px(hover[2]) + 12)),
-            top: Math.max(0, py(hover[4]) - 70),
+            top: Math.max(0, py(hover[7]) - 86),
           }}
         >
           <p className="font-medium text-ink">{hover[1]}</p>
@@ -184,7 +190,10 @@ export default function MetroChart({
             Raw pool <span className="text-ink tabular-nums">{fmt(hover[2])}</span>
           </p>
           <p className="text-muted">
-            Adjusted <span className="text-ink tabular-nums">{fmt(hover[3])}</span> (×{hover[4].toFixed(2)})
+            Competitors per person <span className="text-ink tabular-nums">{hover[7].toFixed(2)}</span>
+          </p>
+          <p className="text-muted">
+            Your adjusted pool <span className="text-ink tabular-nums">{fmt(hover[3])}</span> (×{hover[4].toFixed(2)})
           </p>
         </div>
       )}
