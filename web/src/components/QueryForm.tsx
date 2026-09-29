@@ -234,7 +234,7 @@ export default function QueryForm({
 
       <SliderRow
         label="Earning at least"
-        shown={f.incomeMin ? `$${f.incomeMin}k a year` : "any income"}
+        shown={f.incomeMin ? `$${f.incomeMin}k+` : "any"}
         active={f.incomeMin > 0}
         onReset={() => set({ filters: { ...f, incomeMin: 0 } })}
       >
@@ -255,7 +255,7 @@ export default function QueryForm({
         label="Their height"
         shown={
           !hr
-            ? "any height"
+            ? "any"
             : hr.lo <= HEIGHT_MIN
               ? `up to ${ft(hr.hi)}`
               : hr.hi >= HEIGHT_MAX
@@ -298,7 +298,7 @@ export default function QueryForm({
 
       <SliderRow
         label="BMI under"
-        shown={f.bmiMax ? `BMI under ${f.bmiMax}` : "any BMI"}
+        shown={f.bmiMax ? `under ${f.bmiMax}` : "any"}
         active={f.bmiMax > 0}
         onReset={() => set({ filters: { ...f, bmiMax: 0 } })}
       >
