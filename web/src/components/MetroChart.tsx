@@ -61,6 +61,19 @@ export default function MetroChart({
     const d = x1 > x0 ? `M${px(x0).toFixed(1)},${py(x0 / A).toFixed(1)}L${px(x1).toFixed(1)},${py(x1 / A).toFixed(1)}` : "";
     return { A, d, lx: x0 };
   });
+  // Label each diagonal where it meets the top edge, skipping any that would
+  // run into the previous label or off the chart.
+  const isoLabels: { A: number; x: number; text: string }[] = [];
+  let labelRight = -Infinity;
+  for (const { A, d, lx } of isos) {
+    if (!d || lx !== A * yLo) continue;
+    const text = w < 520 ? fmt(A) : `${fmt(A)} typical adjusted`;
+    const x = px(lx) + 4;
+    const tw = text.length * 5.6;
+    if (x < labelRight + 8 || x + tw > w - M.right) continue;
+    isoLabels.push({ A, x, text });
+    labelRight = x + tw;
+  }
 
   // Draw order: background dots, then neighbors, then leaders and pinned
   // places, then you.
@@ -112,20 +125,22 @@ export default function MetroChart({
         <text x={w - M.right} y={py(1) - 6} textAnchor="end" className="fill-muted text-[11px]">
           one competitor per person
         </text>
-        {isos.map(({ A, d, lx }) =>
-          d ? (
-            <g key={`iso${A}`}>
-              <path d={d} fill="none" className="stroke-rule" strokeDasharray="3 4" strokeWidth={1} />
-              {lx === A * yLo && px(lx) + 80 < w - M.right && (
-                <text x={px(lx) + 4} y={M.top + 10} className="fill-muted text-[10px]">
-                  {fmt(A)} typical adjusted
-                </text>
-              )}
-            </g>
-          ) : null,
+        {isos.map(({ A, d }) =>
+          d ? <path key={`iso${A}`} d={d} fill="none" className="stroke-rule" strokeDasharray="3 4" strokeWidth={1} /> : null,
         )}
-        {xTicks.map((t) => (
-          <text key={`x${t}`} x={px(t)} y={h - M.bottom + 18} textAnchor="middle" className="fill-muted text-[11px] tabular-nums">
+        {isoLabels.map(({ A, x, text }) => (
+          <text key={`isol${A}`} x={x} y={M.top + 10} className="fill-muted text-[10px]">
+            {text}
+          </text>
+        ))}
+        {xTicks.map((t, i) => (
+          <text
+            key={`x${t}`}
+            x={px(t)}
+            y={h - M.bottom + 18}
+            textAnchor={i === xTicks.length - 1 ? "end" : "middle"}
+            className="fill-muted text-[11px] tabular-nums"
+          >
             {fmt(t)}
           </text>
         ))}

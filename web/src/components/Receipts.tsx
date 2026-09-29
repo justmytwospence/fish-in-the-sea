@@ -34,8 +34,8 @@ export default function Receipts({ steps, thin = false, records = 0 }: { steps: 
         <thead>
           <tr className="border-b border-rule text-left text-xs uppercase tracking-wide text-muted">
             <th className="py-2 font-medium">Every step</th>
-            <th className="py-2 text-right font-medium">Kept</th>
-            <th className="py-2 text-right font-medium">Left</th>
+            <th className="py-2 pl-3 text-right font-medium">Kept</th>
+            <th className="py-2 pl-3 text-right font-medium">Left</th>
           </tr>
         </thead>
         <tbody>
@@ -79,10 +79,10 @@ export default function Receipts({ steps, thin = false, records = 0 }: { steps: 
                       </span>
                     )}
                   </td>
-                  <td className="py-2 text-right tabular-nums text-muted">
+                  <td className="whitespace-nowrap py-2 pl-3 text-right tabular-nums text-muted">
                     {factor === null ? "" : `${Math.round(Math.min(1, factor) * 100)}%`}
                   </td>
-                  <td className="py-2 text-right font-medium tabular-nums">{fmt(s.value)}</td>
+                  <td className="whitespace-nowrap py-2 pl-3 text-right font-medium tabular-nums">{fmt(s.value)}</td>
                 </tr>
                 {isOpen && (
                   <tr id={`step-${s.key}`} className="border-b border-rule/60 bg-rule/10">

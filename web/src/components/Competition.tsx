@@ -87,48 +87,61 @@ function PairTable({
   rows,
   you,
   note,
+  cols,
+  wide,
 }: {
   title: string;
   labels: string[];
+  cols?: string[]; // shorter column headers, when the row labels are long
+  wide?: boolean; // span both columns of the grid (many columns)
   rows: { share: number; appeal: number[] }[];
   you?: number;
   note: string;
 }) {
   return (
-    <div>
+    <div className={wide ? "sm:col-span-2" : ""}>
       <p className="text-sm font-medium">{title}</p>
-      <table className="mt-2 w-full text-[11px]">
-        <thead>
-          <tr className="text-muted">
-            <th className="py-1 text-left font-normal">Theirs</th>
-            {labels.map((e, j) => (
-              <th key={e} className={`py-1 text-right font-normal ${you === j ? "font-semibold text-accent" : ""}`}>
-                {e}
+      <div className="-mx-1 overflow-x-auto">
+        <table className="mt-2 w-full border-separate border-spacing-x-1 text-[11px]">
+          <thead>
+            <tr className="text-muted">
+              <th scope="col" className="py-1 text-left font-normal">
+                Theirs
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className="border-t border-rule/60">
-              <td className="py-1.5">
-                {labels[i]} <span className="text-muted">({pct(row.share)})</span>
-              </td>
-              {row.appeal.map((v, j) => (
-                <td key={j} className="py-1.5 text-right tabular-nums">
-                  <span
-                    className={`inline-block min-w-9 rounded px-1 ${you === j ? "ring-1 ring-ink" : ""}`}
-                    style={{ background: pairColor(v) }}
-                    title={`${v.toFixed(2)}× as likely as a random pick`}
-                  >
-                    {fmtTimes(v)}
-                  </span>
-                </td>
+              {labels.map((e, j) => (
+                <th
+                  key={e}
+                  scope="col"
+                  title={e}
+                  className={`whitespace-nowrap py-1 text-right font-normal ${you === j ? "font-semibold text-accent" : ""}`}
+                >
+                  {cols?.[j] ?? e}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i}>
+                <th scope="row" className="whitespace-nowrap border-t border-rule/60 py-1.5 pr-1 text-left font-normal">
+                  {labels[i]} <span className="text-muted">({pct(row.share)})</span>
+                </th>
+                {row.appeal.map((v, j) => (
+                  <td key={j} className="border-t border-rule/60 py-1.5 text-right tabular-nums">
+                    <span
+                      className={`inline-block min-w-9 whitespace-nowrap rounded px-1 ${you === j ? "ring-1 ring-ink" : ""}`}
+                      style={{ background: pairColor(v) }}
+                      title={`${v.toFixed(2)}× as likely as a random pick`}
+                    >
+                      {fmtTimes(v)}
+                    </span>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <p className="mt-1 text-[11px] text-muted">{note}</p>
     </div>
   );
@@ -148,29 +161,27 @@ function Scale({ title, levels, values, you }: { title: string; levels: string[]
   return (
     <div>
       <p className="text-sm font-medium">{title}</p>
-      <div className="relative mt-2 h-6">
-        <div className="absolute inset-x-0 top-1/2 h-px bg-rule" />
-        {values.map((v, i) => (
-          <span
-            key={i}
-            title={`${levels[i]}: ${Math.round(v * 100)}%`}
-            className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full ${
-              you === i ? "bg-accent ring-4 ring-accent-soft" : "bg-census"
-            }`}
-            style={{ left: `${v * 100}%` }}
-          />
-        ))}
-      </div>
-      <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted">
-        {values
-          .map((v, i) => ({ v, i }))
-          .sort((a, b) => b.v - a.v)
-          .map(({ v, i }) => (
-            <li key={i} className={you === i ? "font-semibold text-accent" : ""}>
-              {levels[i]} {Math.round(v * 100)}
-            </li>
+      <table className="mt-2 w-full text-xs">
+        <tbody>
+          {levels.map((label, i) => (
+            <tr key={label} className={you === i ? "font-semibold text-accent" : "text-muted"}>
+              <th scope="row" className="w-28 whitespace-nowrap py-0.5 pr-3 text-left font-normal">
+                {label}
+                {you === i && " (you)"}
+              </th>
+              <td className="py-0.5">
+                <span className="block h-2 overflow-hidden rounded-[4px] bg-rule/40">
+                  <span
+                    className={`block h-full rounded-[4px] ${you === i ? "bg-accent" : "bg-census"}`}
+                    style={{ width: `${values[i] * 100}%` }}
+                  />
+                </span>
+              </td>
+              <td className="w-10 py-0.5 pl-3 text-right tabular-nums">{Math.round(values[i] * 100)}</td>
+            </tr>
           ))}
-      </ul>
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -425,6 +436,8 @@ export default function Competition({
           <PairTable
             title="Religion (who ends up with whom)"
             labels={RELIGIONS.map((r) => r.replace("Latter-day Saint", "LDS").replace("Other religion", "Other").replace("Not religious", "None"))}
+            cols={["Prot.", "Cath.", "LDS", "Jew.", "Other", "None"]}
+            wide
             rows={c.prefs.religionRows}
             you={you.religion}
             note="From married couples under 45 in the General Social Survey."
