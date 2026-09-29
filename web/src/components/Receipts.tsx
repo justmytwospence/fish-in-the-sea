@@ -11,14 +11,19 @@ const KIND: Record<StepKind, { tag: string; title: string }> = {
   dial: { tag: "your guess", title: "Your own assumption" },
 };
 
-// The receipts: every step of the sieve as a table, with sources and margins.
+// Every step of the sieve, each with its own small expander for the source,
+// method and margin of error.
 export default function Receipts({ steps, thin = false, records = 0 }: { steps: Step[]; thin?: boolean; records?: number }) {
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (key: string) =>
+    setOpen((o) => {
+      const n = new Set(o);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
   return (
-    <details className="mt-4">
-      <summary className="cursor-pointer select-none text-sm text-muted hover:text-ink">
-        Show the receipts: every step, its source and margin of error
-      </summary>
+    <section aria-label="Every step" className="mt-6">
       {thin && (
         <p className="mt-3 rounded-md border border-accent/40 bg-accent-soft/40 p-3 text-sm">
           Only about {Math.max(1, Math.round(records))} survey records in this metro match every Census filter you&apos;ve
@@ -28,7 +33,7 @@ export default function Receipts({ steps, thin = false, records = 0 }: { steps: 
       <table className="mt-3 w-full text-sm">
         <thead>
           <tr className="border-b border-rule text-left text-xs uppercase tracking-wide text-muted">
-            <th className="py-2 font-medium">Step</th>
+            <th className="py-2 font-medium">Every step</th>
             <th className="py-2 text-right font-medium">Kept</th>
             <th className="py-2 text-right font-medium">Left</th>
           </tr>
@@ -37,16 +42,26 @@ export default function Receipts({ steps, thin = false, records = 0 }: { steps: 
           {steps.map((s, i) => {
             const factor = i > 0 && steps[i - 1].value > 0 ? s.value / steps[i - 1].value : null;
             const modeled = s.kind === "survey" || s.kind === "dial";
-            const isOpen = open === s.key;
+            const isOpen = open.has(s.key);
             return (
               <Fragment key={s.key}>
-                <tr
-                  className="cursor-pointer border-b border-rule/60 hover:bg-rule/20"
-                  onClick={() => setOpen(isOpen ? null : s.key)}
-                  aria-expanded={isOpen}
-                >
+                <tr className={`border-b border-rule/60 ${isOpen ? "" : "hover:bg-rule/20"}`}>
                   <td className="py-2 pr-2">
-                    {s.label}{" "}
+                    <button
+                      type="button"
+                      onClick={() => toggle(s.key)}
+                      aria-expanded={isOpen}
+                      aria-controls={`step-${s.key}`}
+                      className="group inline-flex items-baseline gap-1.5 text-left"
+                    >
+                      <span
+                        aria-hidden
+                        className={`inline-block w-3 text-[10px] text-muted transition-transform group-hover:text-ink ${isOpen ? "rotate-90" : ""}`}
+                      >
+                        ▶
+                      </span>
+                      <span className="group-hover:underline">{s.label}</span>
+                    </button>{" "}
                     <span
                       title={KIND[s.kind].title}
                       className={`ml-1 rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${
@@ -70,8 +85,8 @@ export default function Receipts({ steps, thin = false, records = 0 }: { steps: 
                   <td className="py-2 text-right font-medium tabular-nums">{fmt(s.value)}</td>
                 </tr>
                 {isOpen && (
-                  <tr>
-                    <td colSpan={3} className="px-2 py-3 text-muted">
+                  <tr id={`step-${s.key}`} className="border-b border-rule/60 bg-rule/10">
+                    <td colSpan={3} className="py-3 pl-6 pr-2 text-muted">
                       <p className="text-ink">{s.note}</p>
                       {s.moe > 0 && (
                         <p className="mt-1">
@@ -96,6 +111,6 @@ export default function Receipts({ steps, thin = false, records = 0 }: { steps: 
           })}
         </tbody>
       </table>
-    </details>
+    </section>
   );
 }
