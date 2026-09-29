@@ -180,6 +180,7 @@ select p.*, st*100000 + puma as stpuma,
   case when coalesce(pincp, 0) * adjinc / 1e6 >= 120000 then 3
        when coalesce(pincp, 0) * adjinc / 1e6 >= 60000 then 2
        when coalesce(pincp, 0) * adjinc / 1e6 >= 25000 then 1 else 0 end as inc,
+  case when rel in (25,26,27) then 1 else 0 end as par,
   case {' '.join(f"when age between {lo} and {hi} then {i}" for i, (lo, hi) in enumerate(BINS))}
        else -1 end as bin
 from '{PQ}' p join hh using (SERIALNO)
@@ -189,10 +190,12 @@ div_of_state = {int(k): int(v) for k, v in state_div.items()}
 con.execute("create or replace table stdiv (st int, division int)")
 con.executemany("insert into stdiv values (?, ?)", list(div_of_state.items()))
 
-# Attribute cell: 0..47 = cohab*24 + edu*8 + kids*4 + inc (income bracket
-# <25k, 25-60k, 60-120k, 120k+ in 2024 dollars); 48 = institutional group quarters.
-CELL = "case when inst = 1 then 48 else cohab*24 + edu*8 + kids*4 + inc end"
-NCELL = 49
+# Attribute cell: 0..95 = (((cohab*3 + edu)*2 + kids)*2 + par)*4 + inc, where
+# par = lives with parents (child of the householder) and inc is the income
+# bracket (<25k, 25-60k, 60-120k, 120k+ in 2024 dollars); 96 = institutional
+# group quarters.
+CELL = "case when inst = 1 then 96 else (((cohab*3 + edu)*2 + kids)*2 + par)*4 + inc end"
+NCELL = 97
 
 
 def dist(df: pd.DataFrame, keys: list[str]) -> dict:
@@ -292,6 +295,17 @@ b01 = read_table("B01001")
 b01 = b01[b01.GEO_ID.isin(want)].set_index("GEO_ID").apply(num)
 
 
+# Vintage 2025 population estimates (July 1, 2025) by CBSA, sex and single
+# year of age. ACS 5-year counts are centered around 2022; we rake each
+# sex x age bin to the 2025 total and keep the ACS marital-status mix.
+pep = con.execute(f"""
+  select lpad(CBSA::varchar, 5, '0') cbsa, AGE age, TOT_MALE m, TOT_FEMALE f
+  from read_csv('{RAW}/cbsa-est2025-syasex.csv') where SUMLEV = 310 and YEAR = 7
+""").df()
+pep_by = {c: g.set_index("age") for c, g in pep.groupby("cbsa")}
+PEP_VINTAGE = "Vintage 2025 population estimates (July 1, 2025)"
+
+
 def cell_est(geo: str, sex: int, marg: str, bin_i: int) -> tuple[float, float]:
     est = moe2 = 0.0
     for ln in b12002_line(sex, marg, bin_i):
@@ -311,19 +325,29 @@ for m in markets:
         print("  missing", m["name"])
         continue
     d = int(m["division"])
+    pe = pep_by.get(m.get("cbsa"))
     shard = dict(id=m["id"], name=m["name"], kind=m["kind"], division=d,
-                 pop=m["pop"],
-                 sexPop={"1": int(b01.at[geo, "B01001_E002"]),
-                         "2": int(b01.at[geo, "B01001_E026"])},
+                 pop=int(pe.m.sum() + pe.f.sum()) if pe is not None else m["pop"],
+                 sexPop={"1": int(pe.m.sum()) if pe is not None else int(b01.at[geo, "B01001_E002"]),
+                         "2": int(pe.f.sum()) if pe is not None else int(b01.at[geo, "B01001_E026"])},
                  counts={}, moe={}, attrs={}, neff={})
     for sex in (1, 2):
         s = str(sex)
         shard["counts"][s], shard["moe"][s] = {}, {}
         shard["attrs"][s], shard["neff"][s] = {}, {}
+        # 2025 / ACS factor per age bin for this sex.
+        factor = []
+        for i, (lo, hi) in enumerate(BINS):
+            acs = sum(cell_est(geo, sex, mg, i)[0] for mg in MARG)
+            if pe is None or acs <= 0:
+                factor.append(1.0)
+                continue
+            col = pe["m" if sex == 1 else "f"]
+            factor.append(float(col.loc[lo:min(hi, 85)].sum()) / acs)
         for mi, mg in enumerate(MARG):
             est_moe = [cell_est(geo, sex, mg, i) for i in range(len(BINS))]
-            shard["counts"][s][mg] = [round(e) for e, _ in est_moe]
-            shard["moe"][s][mg] = [round(mo) for _, mo in est_moe]
+            shard["counts"][s][mg] = [round(e * factor[i]) for i, (e, _) in enumerate(est_moe)]
+            shard["moe"][s][mg] = [round(mo * factor[i]) for i, (_, mo) in enumerate(est_moe)]
             if mg == "mar":
                 continue
             A, N = [], []
@@ -335,12 +359,12 @@ for m in markets:
             shard["attrs"][s][mg] = A
             shard["neff"][s][mg] = N
     (OUT / "m" / f"{m['id']}.json").write_text(json.dumps(shard, separators=(",", ":")))
-    index.append(dict(id=m["id"], name=m["name"], kind=m["kind"], pop=m["pop"]))
+    index.append(dict(id=m["id"], name=m["name"], kind=m["kind"], pop=shard["pop"], cbsa=m.get("cbsa")))
 
 # Searchable places: every place >= 2,500 people that maps to a market.
 by_cbsa = {m["cbsa"]: m["id"] for m in markets if "cbsa" in m}
 by_place = {m["place"]: m["id"] for m in markets if "place" in m}
-gaz = pd.read_csv(RAW / "2024_Gaz_place_national.txt", sep="\t", dtype={"GEOID": str})
+gaz = pd.read_csv(RAW / "2026_Gaz_place_national.txt", sep="|", dtype={"GEOID": str})
 gaz.columns = [c.strip() for c in gaz.columns]
 latlon = {g: (round(la, 3), round(lo, 3)) for g, la, lo in zip(gaz.GEOID, gaz.INTPTLAT, gaz.INTPTLONG)}
 plist = []
@@ -358,7 +382,8 @@ for r in places[places["pop"] >= 2500].itertuples():
 plist.sort(key=lambda x: -x[3])
 
 (OUT / "markets.json").write_text(json.dumps(
-    dict(year=f"ACS 2020-{YEAR} 5-year", markets=index, places=plist), separators=(",", ":")))
+    dict(year=f"ACS 2020-{YEAR} 5-year, scaled to {PEP_VINTAGE}", markets=index, places=plist),
+    separators=(",", ":")))
 (OUT / "global.json").write_text(json.dumps(
     dict(bins=BINS, marg=MARG, ageMin=AGE_MIN, ageMax=AGE_MAX,
          ageShares=age_shares, partnerCdf=cdfs), separators=(",", ":")))
