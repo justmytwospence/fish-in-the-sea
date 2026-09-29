@@ -62,14 +62,16 @@ function SliderRow({
 }) {
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="w-full text-sm text-muted sm:w-36">{label}</span>
+      <span className="flex w-full items-baseline gap-2 text-sm text-muted sm:w-40">
+        {label}
+        {active && (
+          <button type="button" onClick={onReset} className="text-xs underline hover:text-ink">
+            any
+          </button>
+        )}
+      </span>
       <div className="min-w-0 flex-1 sm:max-w-xs">{children}</div>
       <span className={`shrink-0 text-sm tabular-nums sm:w-28 ${active ? "font-medium text-ink" : "text-muted"}`}>{shown}</span>
-      {active && (
-        <button type="button" onClick={onReset} className="text-xs text-muted underline hover:text-ink">
-          any
-        </button>
-      )}
     </div>
   );
 }
@@ -276,7 +278,7 @@ export default function QueryForm({
         />
       </SliderRow>
       {query.you.height !== undefined && (
-        <div className="mt-1 flex flex-wrap gap-2 text-xs sm:pl-[9.75rem]">
+        <div className="mt-1 flex flex-wrap gap-2 text-xs sm:pl-[10.75rem]">
           <button
             type="button"
             onClick={() => set({ filters: { ...f, height: { lo: HEIGHT_MIN, hi: query.you.height! } } })}
