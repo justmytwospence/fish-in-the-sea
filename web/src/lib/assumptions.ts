@@ -39,14 +39,21 @@ export function attraction(sex: Sex, to: Sex, age: number): number {
 }
 
 // Share of unpartnered adults (not married, not cohabiting) who are
-// nonetheless in a committed relationship. Derived as
-// 1 - (Pew 2019 "single" share) / (ACS 2020-24 unpartnered share) by age
-// band, pooling sexes because men and women report committed relationships
-// asymmetrically. Consistent with Stanford HCMST (26% in 2022, 37% in 2017).
-const IN_RELATIONSHIP: Curve = [[24, 0.44], [40, 0.28], [57, 0.1], [72, 0.12]];
+// nonetheless in a relationship with someone they don't live with, by sex and
+// age (anchors at band midpoints). Weighted microdata estimates bracket it:
+// the strict GSS 2012-24 "steady partner" item (~15%) is a floor, the broad
+// "boyfriend/girlfriend/romantic partner" items in HCMST 2017 and GSS 1996/98
+// (32-38%) a ceiling, with NSFG 2022-23 current partners in between. Values
+// sit mid-range, leaning on recent sources; every source shows unpartnered
+// women under 50 reporting more such relationships than men, and the reverse
+// after 55.
+const IN_RELATIONSHIP: Record<Sex, Curve> = {
+  1: [[21, 0.22], [27, 0.24], [32, 0.25], [37, 0.24], [42, 0.24], [47, 0.26], [52, 0.26], [60, 0.2], [72, 0.18]],
+  2: [[21, 0.42], [27, 0.42], [32, 0.38], [37, 0.34], [42, 0.32], [47, 0.3], [52, 0.28], [60, 0.15], [72, 0.08]],
+};
 
-export function inRelationship(age: number): number {
-  return interp(IN_RELATIONSHIP, age);
+export function inRelationship(sex: Sex, age: number): number {
+  return interp(IN_RELATIONSHIP[sex], age);
 }
 
 // Share of singles "currently looking for a relationship or dates".
@@ -89,8 +96,16 @@ export const SOURCES = {
     url: "https://www.pewresearch.org/short-reads/2023/02/08/for-valentines-day-5-facts-about-single-americans/",
   },
   hcmst: {
-    label: "Rosenfeld (2025), the pandemic dating recession, HCMST 2017-2022",
-    url: "https://web.stanford.edu/~mrosenfe/Rosenfeld_Pandemic_dating_recession_2025.pdf",
+    label: "Stanford How Couples Meet and Stay Together 2017 (microdata)",
+    url: "https://data.stanford.edu/hcmst2017",
+  },
+  gss: {
+    label: "General Social Survey 1996-2024 (microdata: ROMANCE, POSSLQ)",
+    url: "https://gss.norc.org/us/en/gss/get-the-data/stata.html",
+  },
+  nsfg2022: {
+    label: "CDC National Survey of Family Growth 2022-2023 (microdata)",
+    url: "https://www.cdc.gov/nchs/nsfg/nsfg-2022-2023-puf.htm",
   },
   choo: {
     label: "Choo & Siow (2006), Who marries whom and why",

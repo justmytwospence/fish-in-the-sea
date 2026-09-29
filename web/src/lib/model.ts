@@ -202,7 +202,7 @@ function pool(
       const avg = (f: (a: number) => number) => ages.reduce((t, a, i) => t + sh[i] * f(a), 0) / S;
       const fh = (a: number) => (hf ? heightShare(sex, a, q.you.height!, hf) : 1);
       const fo = (a: number) => fh(a) * (q.model.orientation ? attraction(sex, towards, a) : 1);
-      const fr = (a: number) => fo(a) * (q.model.relationship ? 1 - inRelationship(a) : 1);
+      const fr = (a: number) => fo(a) * (q.model.relationship ? 1 - inRelationship(sex, a) : 1);
       const fl = (a: number) => fr(a) * (q.model.looking ? looking(sex, a) : 1);
       const spark = q.model.spark > 0 ? q.model.spark : 1;
       add(out.height, C, varC, pKids, n, avg(fh));
@@ -277,8 +277,8 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
     push("orientation", `Into ${noun(M)}`, `not into ${noun(M)}`, t.orientation, "survey", [SOURCES.gallup, SOURCES.nsfg],
       "National rates by sex and age (not local). Bisexual people count as attracted to both.");
   if (q.model.relationship)
-    push("relationship", "Not seeing anyone", "seeing someone", t.relationship, "survey", [SOURCES.pewSingles, SOURCES.hcmst],
-      "About a quarter to a third of people who are neither married nor cohabiting are still in a committed relationship, more when young.");
+    push("relationship", "Not seeing anyone", "seeing someone", t.relationship, "survey", [SOURCES.gss, SOURCES.hcmst, SOURCES.nsfg2022],
+      "Removes unpartnered people who have a boyfriend, girlfriend or partner they don't live with. Estimated by sex and age from survey microdata: strict 'steady partner' questions (GSS) find about 15%, broad 'romantic partner' questions (HCMST, GSS 1996/98) 32-38%; we use the middle. Unpartnered women under 50 report more of these relationships than men; after 55 it flips.");
   if (q.model.looking)
     push("looking", "Actually looking", "not looking", t.looking, "survey", [SOURCES.pewLooking],
       "Share of singles currently looking for a relationship or dates, by age and sex. Many singles aren't.");

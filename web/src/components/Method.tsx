@@ -46,9 +46,11 @@ export default function Method({ dataYear }: { dataYear: string }) {
             people count toward both sexes.
           </li>
           <li>
-            Already seeing someone: the gap between Pew&apos;s &ldquo;single&rdquo; share (<Src s={SOURCES.pewSingles} />)
-            and the ACS unpartnered share, by age, which lands in line with{" "}
-            <Src s={SOURCES.hcmst} /> (26–37% of the unpartnered are in a relationship).
+            Already seeing someone: weighted estimates, by sex and age, of unpartnered people with a boyfriend,
+            girlfriend or partner they don&apos;t live with, from <Src s={SOURCES.gss} />,{" "}
+            <Src s={SOURCES.hcmst} /> and <Src s={SOURCES.nsfg2022} />. Question wording matters most: strict
+            &ldquo;steady partner&rdquo; items give about 15%, broad &ldquo;romantic partner&rdquo; items 32–38%; the
+            sieve uses the middle (about 42% of unpartnered women in their 20s, 24% of men, falling after 55).
           </li>
           <li>
             Looking (off by default): <Src s={SOURCES.pewLooking} />. Under 50, about 57% of singles say they&apos;re
