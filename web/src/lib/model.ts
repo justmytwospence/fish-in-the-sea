@@ -8,7 +8,7 @@ import {
   type Source,
 } from "./assumptions";
 import { compete, type Choice, type Competition, type You } from "./competition";
-import { NPOL, NRACE, NREL, NTYPE, PARTIES, RACES, RELIGIONS, typeIndex, type Typed } from "./types";
+import { NPOL, NRACE, NREL, NTYPE, PARTY_PLURAL, RACES, RELIGIONS, typeIndex, type Typed } from "./types";
 
 export type Marg = "nm" | "sep" | "wid" | "div" | "mar";
 type UMarg = Exclude<Marg, "mar">;
@@ -545,8 +545,15 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
       "National religious identification of unmarried adults by sex and age (General Social Survey 2016-2024), shifted by how this state or metro differs from the US. Applied as independent of every other filter.");
   }
   if (q.filters.politics.length && g.politics) {
-    const names = [...q.filters.politics].sort().map((r) => PARTIES[r]);
-    push("politics", names.join(" or "), "other political leanings", t.politics, "survey", [SOURCES.gss, SOURCES.election],
+    // Shown as dealbreakers: "No Republicans" rather than "Democratic or
+    // Independent/other".
+    const out = PARTY_PLURAL.map((_, r) => r).filter((r) => !q.filters.politics.includes(r));
+    const kept = [...q.filters.politics].sort();
+    const [label, gone] =
+      out.length === 1
+        ? [`No ${PARTY_PLURAL[out[0]]}`, PARTY_PLURAL[out[0]]]
+        : [`${kept.map((r) => PARTY_PLURAL[r]).join(" and ")} only`, out.map((r) => PARTY_PLURAL[r]).join(" and ")];
+    push("politics", label, gone, t.politics, "survey", [SOURCES.gss, SOURCES.election],
       "Party identification of unmarried adults by sex and age (General Social Survey 2016-2024, leaners counted with their party), with Democratic vs. Republican odds shifted by how this metro voted in 2024 relative to the country. Applied as independent of every other filter.");
   }
   if (q.filters.bmiMax && g.health)

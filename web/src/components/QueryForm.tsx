@@ -2,7 +2,7 @@
 
 import type { Sex } from "@/lib/assumptions";
 import { heightDefault, type Query } from "@/lib/model";
-import { PARTIES, RACES, RELIGIONS } from "@/lib/types";
+import { NPOL, PARTY_PLURAL, RACES, RELIGIONS } from "@/lib/types";
 import CityPicker from "./CityPicker";
 
 const ages = Array.from({ length: 73 }, (_, i) => i + 18);
@@ -49,13 +49,24 @@ function HeightSelect({ value, onChange }: { value: number | undefined; onChange
   );
 }
 
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip({
+  on,
+  onClick,
+  disabled,
+  children,
+}: {
+  on: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       aria-pressed={on}
       onClick={onClick}
-      className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+      disabled={disabled}
+      className={`rounded-full border px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
         on ? "border-accent bg-accent text-paper" : "border-rule text-ink hover:border-muted"
       }`}
     >
@@ -170,26 +181,33 @@ export default function QueryForm({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-sm text-muted">Politics:</span>
+        <span className="mr-1 text-sm text-muted">Politics, rule out:</span>
         <Chip on={f.politics.length === 0} onClick={() => set({ filters: { ...f, politics: [] } })}>
-          any
+          nobody
         </Chip>
-        {PARTIES.map((label, r) => (
-          <Chip
-            key={label}
-            on={f.politics.includes(r)}
-            onClick={() =>
-              set({
-                filters: {
-                  ...f,
-                  politics: f.politics.includes(r) ? f.politics.filter((x) => x !== r) : [...f.politics, r],
-                },
-              })
-            }
-          >
-            {label}
-          </Chip>
-        ))}
+        {PARTY_PLURAL.map((label, r) => {
+          // Stored as the parties kept (empty = everyone); shown as dealbreakers.
+          const excluded = f.politics.length ? [0, 1, 2].filter((x) => !f.politics.includes(x)) : [];
+          const on = excluded.includes(r);
+          const next = on ? excluded.filter((x) => x !== r) : [...excluded, r];
+          return (
+            <Chip
+              key={label}
+              on={on}
+              disabled={next.length >= NPOL}
+              onClick={() =>
+                set({
+                  filters: {
+                    ...f,
+                    politics: next.length ? [0, 1, 2].filter((x) => !next.includes(x)) : [],
+                  },
+                })
+              }
+            >
+              {label}
+            </Chip>
+          );
+        })}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">

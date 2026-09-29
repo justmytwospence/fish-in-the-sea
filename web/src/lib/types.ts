@@ -25,7 +25,9 @@ export interface Typed {
 
 // Political leaning (party identification, leaners with their party).
 export const NPOL = 3;
-export const PARTIES = ["Democratic", "Independent", "Republican"];
+// Independent/other: pure independents, third parties and no preference.
+export const PARTIES = ["Democratic", "Independent/other", "Republican"];
+export const PARTY_PLURAL = ["Democrats", "Independents & others", "Republicans"];
 
 // Religion: 0 Protestant (incl. nondenominational Christian), 1 Catholic,
 // 2 Latter-day Saint, 3 Jewish, 4 other religion, 5 none.
