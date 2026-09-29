@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 import { compute, noun } from "@/lib/model";
 import { fmt, shortCity } from "@/lib/format";
 import { DEFAULT_MARKET, parseQuery } from "@/lib/query";
-import { loadGlobal, loadShard } from "@/lib/server-data";
+import { loadChoice, loadGlobal, loadShard } from "@/lib/server-data";
 
 const PAPER = "#f5f0e6";
 const INK = "#1d1a16";
@@ -12,7 +12,7 @@ const ACCENT = "#c8412a";
 export async function GET(req: Request) {
   const query = parseQuery(new URL(req.url).searchParams);
   const shard = (await loadShard(query.market)) ?? (await loadShard(DEFAULT_MARKET));
-  const r = compute(shard!, await loadGlobal(), query);
+  const r = compute(shard!, await loadGlobal(), query, await loadChoice(), false);
   const city = shortCity(r.market.name);
   const steps = r.steps.slice(2);
   const max = steps[0]?.value || 1;
@@ -29,7 +29,7 @@ export async function GET(req: Request) {
             {`${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${city} who might date a ${query.me.age}-year-old ${noun(query.me.sex, false)}.`}
           </div>
           <div style={{ fontSize: 26, marginTop: "auto", color: MUTED }}>
-            {`${Math.round(r.ratio * 100)} competitors per 100 · Census ACS 2020–24`}
+            {`Fair share after competition: ${(r.competition?.fairShare ?? 0).toFixed(2)} · Census ACS 2020–24`}
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", marginLeft: 48, flex: 1, gap: 14 }}>

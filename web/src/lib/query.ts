@@ -9,6 +9,7 @@ export const DEFAULT_QUERY: Query = {
   seek: { sex: 2, lo: 30, hi: 39 },
   filters: { neverMarried: false, edu: 0, noKids: false },
   model: { separated: false, orientation: true, relationship: true, looking: true, spark: 0 },
+  you: {},
 };
 
 type Params = Record<string, string | string[] | undefined> | URLSearchParams;
@@ -48,6 +49,18 @@ export function parseQuery(p: Params): Query {
     looking: !m.has("-look"),
     spark: Math.max(0, Math.min(100, Number(get(p, "spark") ?? 0) || 0)) / 100,
   };
+  // you=e1,i2,k0,p0,h70: education, income bracket, kids, previously married, height
+  q.you = {};
+  for (const part of (get(p, "you") ?? "").split(",")) {
+    const m2 = part.match(/^([eikph])(\d{1,2})$/);
+    if (!m2) continue;
+    const v = +m2[2];
+    if (m2[1] === "e" && v <= 2) q.you.edu = v;
+    if (m2[1] === "i" && v <= 3) q.you.inc = v;
+    if (m2[1] === "k" && v <= 1) q.you.kids = v;
+    if (m2[1] === "p" && v <= 1) q.you.prev = v;
+    if (m2[1] === "h" && v >= 54 && v <= 84) q.you.height = v;
+  }
   return q;
 }
 
@@ -72,5 +85,14 @@ export function serializeQuery(q: Query): string {
   ].filter(Boolean);
   if (m.length) p.set("m", m.join(","));
   if (q.model.spark > 0) p.set("spark", String(Math.round(q.model.spark * 100)));
+  const y = q.you;
+  const you = [
+    y.edu !== undefined && `e${y.edu}`,
+    y.inc !== undefined && `i${y.inc}`,
+    y.kids !== undefined && `k${y.kids}`,
+    y.prev !== undefined && `p${y.prev}`,
+    y.height !== undefined && `h${y.height}`,
+  ].filter(Boolean);
+  if (you.length) p.set("you", you.join(","));
   return p.toString().replace(/%2C/g, ",");
 }

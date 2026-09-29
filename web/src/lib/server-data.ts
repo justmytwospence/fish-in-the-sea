@@ -1,18 +1,20 @@
 import "server-only";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import type { Choice } from "./competition";
 import type { Global, Shard } from "./model";
 
 const DIR = path.join(process.cwd(), "public", "data");
 
 let globalP: Promise<Global> | undefined;
+let choiceP: Promise<Choice> | undefined;
 let marketsP: Promise<MarketIndex> | undefined;
 const shards = new Map<string, Promise<Shard>>();
 
 export interface MarketIndex {
   year: string;
   markets: { id: string; name: string; kind: string; pop: number }[];
-  places: [name: string, state: string, market: string, pop: number][];
+  places: [name: string, state: string, market: string, pop: number, lat: number | null, lon: number | null][];
 }
 
 async function json<T>(file: string): Promise<T> {
@@ -21,6 +23,10 @@ async function json<T>(file: string): Promise<T> {
 
 export function loadGlobal() {
   return (globalP ??= json<Global>("global.json"));
+}
+
+export function loadChoice() {
+  return (choiceP ??= json<Choice>("choice.json"));
 }
 
 export function loadMarkets() {
@@ -38,4 +44,24 @@ export function loadShard(id: string): Promise<Shard | null> {
     shards.delete(id);
     return null;
   });
+}
+
+// Nearest sizable place to a coordinate, and the market it belongs to.
+export async function nearestMarket(lat: number, lon: number) {
+  if (!isFinite(lat) || !isFinite(lon)) return null;
+  const { places } = await loadMarkets();
+  const cos = Math.cos((lat * Math.PI) / 180);
+  let best: MarketIndex["places"][number] | null = null;
+  let bestD = Infinity;
+  for (const p of places) {
+    if (p[4] === null || p[5] === null) continue;
+    const d = (p[4] - lat) ** 2 + ((p[5] - lon) * cos) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  // About 60 miles: beyond that we're probably outside the US.
+  if (!best || Math.sqrt(bestD) > 1) return null;
+  return { market: best[2], place: `${best[0]}, ${best[1]}` };
 }

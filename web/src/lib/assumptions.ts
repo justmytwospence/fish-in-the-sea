@@ -92,8 +92,78 @@ export const SOURCES = {
     label: "Rosenfeld (2025), the pandemic dating recession, HCMST 2017-2022",
     url: "https://web.stanford.edu/~mrosenfe/Rosenfeld_Pandemic_dating_recession_2025.pdf",
   },
+  choo: {
+    label: "Choo & Siow (2006), Who marries whom and why",
+    url: "https://doi.org/10.1086/498585",
+  },
+  mcfadden: {
+    label: "McFadden (1978), sampling alternatives in conditional logit",
+    url: "https://onlinepubs.trb.org/Onlinepubs/trr/1978/673/673-012.pdf",
+  },
+  schwartzMare: {
+    label: "Schwartz & Mare (2005), Trends in educational assortative marriage",
+    url: "https://doi.org/10.1353/dem.2005.0036",
+  },
+  bruch: {
+    label: "Bruch & Newman (2018), Aspirational pursuit of mates in online dating markets",
+    url: "https://doi.org/10.1126/sciadv.aap9815",
+  },
+  hitsch: {
+    label: "Hitsch, Hortaçsu & Ariely (2010), What makes you click?",
+    url: "https://doi.org/10.1007/s11129-010-9088-6",
+  },
+  stulp: {
+    label: "Stulp et al. (2013), Human height is positively related to partner preferences",
+    url: "https://doi.org/10.1371/journal.pone.0054186",
+  },
+  nhanes: {
+    label: "CDC NHANES 2015-2018 anthropometric reference data",
+    url: "https://www.cdc.gov/nchs/data/series/sr_03/sr03-046-508.pdf",
+  },
+  pewProvider: {
+    label: "Pew (2017), Americans see men as the financial providers",
+    url: "https://www.pewresearch.org/short-reads/2017/09/20/americans-see-men-as-the-financial-providers-even-as-womens-contributions-grow/",
+  },
+  diNallo: {
+    label: "Di Nallo (2019), Gender gaps in repartnering: the role of parental status",
+    url: "https://doi.org/10.1111/jomf.12527",
+  },
   backus: {
     label: "Backus (2010), Why I don't have a girlfriend",
     url: "https://www.astro.sunysb.edu/fwalter/AST248/why_i_dont_have_a_girlfriend.pdf",
   },
 } satisfies Record<string, Source>;
+
+// ---------------------------------------------------------------- height
+// NHANES 2015-2018 (Fryar et al. 2021, Tables 10 and 12): means by age, SD
+// derived from the 5th-95th percentile spread.
+export function heightDist(sex: Sex, age: number): { mean: number; sd: number } {
+  if (sex === 1) return age < 40 ? { mean: 69.3, sd: 2.9 } : age < 60 ? { mean: 69.2, sd: 3.0 } : { mean: 68.3, sd: 2.8 };
+  return age < 40 ? { mean: 64.0, sd: 2.7 } : age < 60 ? { mean: 63.7, sd: 2.7 } : { mean: 62.7, sd: 2.6 };
+}
+
+// Relative appeal (log scale) of a candidate's height to a chooser, from the
+// first-contact probits in Hitsch, Hortacsu & Ariely (2010), cross-checked
+// against Stulp et al. (2013). Women: each inch he is shorter than her costs
+// about 40%; appeal rises ~6%/inch up to 8 inches taller, easing past 10.
+// Men: a taller woman costs ~20%/inch, plus a mild penalty above 5'5.5".
+export function heightLogAppeal(chooser: Sex, chooserH: number, candidateH: number): number {
+  if (chooser === 2) {
+    const d = candidateH - chooserH;
+    return 0.06 * Math.min(Math.max(d, 0), 8) - 0.5 * Math.max(-d, 0) - 0.1 * Math.max(d - 10, 0);
+  }
+  return -0.23 * Math.max(candidateH - chooserH, 0) - 0.055 * Math.max(candidateH - 65.5, 0);
+}
+
+// ------------------------------------------------------------------ kids
+// Relative appeal (log) of a candidate with kids at home versus one without,
+// by the candidate's sex and whether the chooser has kids at home:
+// KIDS_LOG[candidate sex][chooser has kids]. Di Nallo (2019) union-formation
+// odds after a breakup by the new partner's parental status (mothers 0.57 with
+// a childless partner vs 1.06 with a parent; fathers 0.85 vs 1.22), consistent
+// with Hitsch et al.'s first-contact estimates (x0.68-0.74 from childless
+// choosers, x1.2 from parents).
+export const KIDS_LOG: Record<Sex, [number, number]> = {
+  1: [Math.log(0.8), Math.log(1.2)],
+  2: [Math.log(0.6), Math.log(1.1)],
+};
