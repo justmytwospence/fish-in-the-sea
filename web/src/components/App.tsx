@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Choice } from "@/lib/competition";
 import { compute, LOW_RECORDS, mergeContext, noun, type Global, type Query, type Result, type Shard } from "@/lib/model";
 import { approx, shortCity } from "@/lib/format";
-import { serializeQuery } from "@/lib/query";
+import { parseQuery, serializeQuery } from "@/lib/query";
 import QueryForm from "./QueryForm";
 import Sieve from "./Sieve";
 import Receipts from "./Receipts";
@@ -17,6 +17,8 @@ import OverTime from "./OverTime";
 import Competition from "./Competition";
 import Leaderboard from "./Leaderboard";
 import Method from "./Method";
+
+const STORAGE_KEY = "the-denominator:search";
 
 const shardCache = new Map<string, Promise<Shard>>();
 let staticPromise: Promise<[Global, Choice]> | undefined;
@@ -88,6 +90,25 @@ export default function App({
   const reqId = useRef(0);
   const qs = useMemo(() => serializeQuery(query), [query]);
 
+  // Remember your search in this browser. A link that carries a search wins;
+  // a bare visit restores the last one. Storage can be unavailable (private
+  // windows, blocked site data), so every access is guarded.
+  const canSave = useRef(false);
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const fromLink = p.has("in") || p.has("me") || p.has("seek");
+    let saved: string | null = null;
+    try {
+      saved = fromLink ? null : window.localStorage.getItem(STORAGE_KEY);
+    } catch {}
+    if (saved) {
+      Promise.resolve().then(() => {
+        canSave.current = true;
+        setQuery(parseQuery(new URLSearchParams(saved)));
+      });
+    } else canSave.current = true;
+  }, []);
+
   useEffect(() => {
     (staticPromise ??= Promise.all([
       Promise.all([
@@ -101,6 +122,11 @@ export default function App({
 
   useEffect(() => {
     window.history.replaceState(null, "", `?${qs}`);
+    if (canSave.current) {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, qs);
+      } catch {}
+    }
     if (!data) return;
     const id = ++reqId.current;
     fetchShard(query.market)
