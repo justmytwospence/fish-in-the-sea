@@ -1,7 +1,9 @@
 // Canvas engine for the sieve: a field of dots (each one standing for `unit`
-// people) that loses the people filtered out at each step. Dropped dots fall
-// through the bottom; survivors regroup. When too few dots are left to read,
-// the engine zooms in: each survivor bursts into finer dots at a smaller unit.
+// people). The dots that make it through every step ("keepers") sit together
+// at the top of the field in the accent color, so the proportion is visible at
+// a glance. Stepping forward drops non-keepers through the bottom and the
+// rest regroup; when too few dots are left to read, the engine zooms in and
+// each survivor bursts into finer dots at a smaller unit.
 
 export interface SieveStep {
   value: number;
@@ -30,6 +32,7 @@ function rng(seed: number) {
 }
 
 interface Dot {
+  keep: boolean;
   x: number;
   y: number;
   fx: number; // tween from
@@ -51,6 +54,7 @@ export interface Plan {
   units: number[]; // people per dot at each step
   zoomAt: boolean[]; // whether step i starts with a zoom
   counts: number[]; // dots at each step
+  keep: number[]; // of those, dots that make it through every step
 }
 
 export function plan(steps: SieveStep[]): Plan {
@@ -72,7 +76,12 @@ export function plan(steps: SieveStep[]): Plan {
     zoomAt.push(zoom);
     counts.push(Math.round(s.value / unit));
   });
-  return { units, zoomAt, counts };
+  // Anyone left at all gets at least one dot, even when they're fewer than a
+  // dot's worth of people.
+  const final = steps[steps.length - 1].value;
+  const keep = units.map((u, i) => Math.min(counts[i], final >= 0.5 ? Math.max(1, Math.round(final / u)) : 0));
+  keep.forEach((k, i) => (counts[i] = Math.max(counts[i], k)));
+  return { units, zoomAt, counts, keep };
 }
 
 export class SieveEngine {
@@ -89,8 +98,7 @@ export class SieveEngine {
   private raf = 0;
   private anim: { start: number; phase: "zoom" | "drop" | "move"; done: () => void } | null = null;
   private rand = rng(7);
-  private colors = { ink: "#222", accent: "#c8412a", final: "#c8412a" };
-  highlight = false;
+  private colors = { ink: "#222", accent: "#c8412a", muted: "#888" };
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d")!;
@@ -112,7 +120,7 @@ export class SieveEngine {
     const cs = getComputedStyle(this.canvas);
     this.colors.ink = cs.getPropertyValue("--census").trim() || this.colors.ink;
     this.colors.accent = cs.getPropertyValue("--accent").trim() || this.colors.accent;
-    this.colors.final = this.colors.accent;
+    this.colors.muted = cs.getPropertyValue("--muted").trim() || this.colors.muted;
   }
 
   // Grid positions for n dots, centered, sized to fill the canvas.
@@ -136,9 +144,15 @@ export class SieveEngine {
     return { pts, r: Math.max(0.7, cell * 0.36) };
   }
 
+  // Flag the first k dots in reading order (the top of the field) as keepers.
+  private markKeep(k: number) {
+    this.dots.forEach((d, i) => (d.keep = i < k));
+  }
+
   private relayout(tween: boolean) {
-    // Keep reading order stable so survivors slide rather than shuffle.
-    this.dots.sort((a, b) => a.ty - b.ty || a.tx - b.tx);
+    // Keepers first, then reading order, so keepers stay a block at the top
+    // and survivors slide rather than shuffle.
+    this.dots.sort((a, b) => Number(b.keep) - Number(a.keep) || a.ty - b.ty || a.tx - b.tx);
     const { pts, r } = this.layout(this.dots.length);
     this.fromR = tween ? this.radius : r;
     this.toR = r;
@@ -156,11 +170,11 @@ export class SieveEngine {
   }
 
   // Jump straight to a dot count with no animation.
-  set(count: number, seed = 7) {
+  set(count: number, keep: number, seed = 7) {
     this.cancel();
     this.rand = rng(seed);
     this.fallers = [];
-    this.dots = Array.from({ length: count }, () => ({ x: 0, y: 0, fx: 0, fy: 0, tx: 0, ty: 0 }));
+    this.dots = Array.from({ length: count }, (_, i) => ({ keep: i < keep, x: 0, y: 0, fx: 0, fy: 0, tx: 0, ty: 0 }));
     const { pts, r } = this.layout(count);
     this.radius = this.fromR = this.toR = r;
     this.dots.forEach((d, i) => {
@@ -177,7 +191,8 @@ export class SieveEngine {
   }
 
   // Animate to a new dot count, optionally zooming to `zoomTo` dots first.
-  transition(count: number, zoomTo: number | null, onDone: () => void) {
+  // Only non-keepers fall.
+  transition(count: number, zoomTo: number | null, keep: number, onDone: () => void) {
     this.cancel();
     const run = (phase: "zoom" | "drop" | "move", after: () => void) => {
       this.anim = { start: performance.now(), phase, done: after };
@@ -187,13 +202,13 @@ export class SieveEngine {
       const n = this.dots.length;
       const k = Math.max(0, Math.min(n, count));
       if (k < n) {
-        // Pick who falls through, at random.
-        const idx = this.dots.map((_, i) => i);
+        // Pick who falls through, at random, from the non-keepers.
+        const idx = this.dots.map((_, i) => i).filter((i) => !this.dots[i].keep);
         for (let i = idx.length - 1; i > 0; i--) {
           const j = Math.floor(this.rand() * (i + 1));
           [idx[i], idx[j]] = [idx[j], idx[i]];
         }
-        const gone = new Set(idx.slice(0, n - k));
+        const gone = new Set(idx.slice(0, Math.min(idx.length, n - k)));
         const keep: Dot[] = [];
         this.dots.forEach((d, i) => {
           if (gone.has(i))
@@ -220,13 +235,14 @@ export class SieveEngine {
       const next: Dot[] = [];
       for (let i = 0; i < zoomTo; i++) {
         const s = src[i % src.length];
-        next.push({ x: s.x, y: s.y, fx: s.x, fy: s.y, tx: s.x, ty: s.y });
+        next.push({ keep: false, x: s.x, y: s.y, fx: s.x, fy: s.y, tx: s.x, ty: s.y });
       }
       this.dots = next;
       this.relayout(true);
+      this.markKeep(keep);
       run("zoom", drop);
     } else if (zoomTo !== null) {
-      this.set(zoomTo);
+      this.set(zoomTo, keep);
       drop();
     } else drop();
   }
@@ -234,15 +250,16 @@ export class SieveEngine {
   // Step backward: the people this step removed rise back up from below. When
   // the previous step used a coarser unit, first merge down to `collapseTo`
   // dots at that unit.
-  restore(count: number, collapseTo: number | null, onDone: () => void) {
+  restore(count: number, collapseTo: number | null, keep: number, onDone: () => void) {
     this.cancel();
     this.fallers = [];
     if (collapseTo !== null) this.dots = this.dots.slice(0, Math.max(0, collapseTo));
     for (let i = this.dots.length; i < count; i++) {
       const x = this.rand() * this.w;
       const y = this.h + 10 + this.rand() * this.h * 0.6;
-      this.dots.push({ x, y, fx: x, fy: y, tx: x, ty: y });
+      this.dots.push({ keep: false, x, y, fx: x, fy: y, tx: x, ty: y });
     }
+    this.markKeep(keep);
     this.relayout(true);
     this.anim = { start: performance.now(), phase: "move", done: onDone };
     if (!this.raf) this.raf = requestAnimationFrame(this.loop);
@@ -293,26 +310,33 @@ export class SieveEngine {
     const { ctx, dpr } = this;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, this.w, this.h);
-    // Falling dots first, so survivors stay crisp on top.
-    ctx.fillStyle = this.colors.accent;
+    // Falling dots first (neutral: red is reserved for keepers).
+    ctx.fillStyle = this.colors.muted;
     for (const f of this.fallers) {
       ctx.globalAlpha = Math.max(0, f.a) * 0.8;
       const r = Math.min(f.r, 6);
       ctx.fillRect(f.x - r, f.y - r, r * 2, r * 2);
     }
     ctx.globalAlpha = 1;
-    ctx.fillStyle = this.highlight ? this.colors.final : this.colors.ink;
     const r = this.radius;
-    if (r < 1.6) {
-      for (const d of this.dots) ctx.fillRect(d.x - r, d.y - r, r * 2, r * 2);
-    } else {
+    const paint = (keep: boolean, color: string, alpha: number) => {
+      ctx.fillStyle = color;
+      ctx.globalAlpha = alpha;
+      if (r < 1.6) {
+        for (const d of this.dots) if (d.keep === keep) ctx.fillRect(d.x - r, d.y - r, r * 2, r * 2);
+        return;
+      }
       ctx.beginPath();
       for (const d of this.dots) {
+        if (d.keep !== keep) continue;
         ctx.moveTo(d.x + r, d.y);
         ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
       }
       ctx.fill();
-    }
+    };
+    paint(false, this.colors.muted, 0.55);
+    paint(true, this.colors.accent, 1);
+    ctx.globalAlpha = 1;
   }
 
   destroy() {

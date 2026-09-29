@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Step } from "@/lib/model";
-import { fmt } from "@/lib/format";
+import { fmt, pct } from "@/lib/format";
 import { plan, SieveEngine } from "./sieve-engine";
 
 const DWELL_MS = 900;
@@ -26,10 +26,9 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
     const e = new SieveEngine(canvas);
     engine.current = e;
     e.readColors();
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const counts = planRef.current.counts;
-    // With reduced motion, wait for a click instead of autoplaying.
-    e.set(counts[0]);
+    // Start still: everyone, with the ones who make it all the way in color.
+    // Nothing moves until you step or press play.
+    e.set(planRef.current.counts[0], planRef.current.keep[0]);
     const ro = new ResizeObserver(([entry]) => {
       const w = entry.contentRect.width;
       const h = Math.round(Math.min(460, Math.max(300, w * (w < 640 ? 0.95 : 0.56))));
@@ -42,19 +41,8 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       e.draw();
     };
     mq.addEventListener("change", recolor);
-    let started = false;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting || started) return;
-        started = true;
-        if (!reduced) setPlaying(true);
-      },
-      { threshold: 0.35 },
-    );
-    io.observe(wrap);
     return () => {
       ro.disconnect();
-      io.disconnect();
       mq.removeEventListener("change", recolor);
       e.destroy();
     };
@@ -67,11 +55,10 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       setPlaying(false);
       setBusy(false);
       setZoomed(null);
-      e.highlight = i === last;
-      e.set(p.counts[i]);
+      e.set(p.counts[i], p.keep[i]);
       setCur(i);
     },
-    [p, last],
+    [p],
   );
 
   // One animated step forward from `from`. The label switches to the new
@@ -85,15 +72,10 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       setZoomed(zoomTo !== null ? p.units[from] / p.units[next] : null);
       setBusy(true);
       setCur(next);
-      e.highlight = false;
-      e.transition(p.counts[next], zoomTo, () => {
+      e.transition(p.counts[next], zoomTo, p.keep[next], () => {
         setBusy(false);
         setZoomed(null);
-        if (next >= last) {
-          setPlaying(false);
-          e.highlight = true;
-          e.draw();
-        }
+        if (next >= last) setPlaying(false);
       });
     },
     [p, last, steps],
@@ -109,8 +91,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       setZoomed(null);
       setBusy(true);
       setCur(prev);
-      e.highlight = false;
-      e.restore(p.counts[prev], collapseTo, () => setBusy(false));
+      e.restore(p.counts[prev], collapseTo, p.keep[prev], () => setBusy(false));
     },
     [p, steps],
   );
@@ -154,6 +135,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
   }, [playing, busy, cur, last, forward]);
 
   const s = steps[cur];
+  const final = steps[last].value;
   const prev = cur > 0 ? steps[cur - 1] : null;
   const modeled = s.kind === "survey" || s.kind === "dial";
   const unit = zoomed ? p.units[Math.max(0, cur - 1)] : p.units[cur];
@@ -192,6 +174,13 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
             <p>
               1 dot = {fmt(unit)} {unit === 1 ? "person" : "people"}
             </p>
+            <p className="mt-1 flex items-center justify-end gap-1.5">
+              <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-accent" />
+              <span>
+                <span className="font-medium text-ink">{fmt(final)}</span> make it all the way
+                {cur < last && s.value > 0 && <> ({pct(final / s.value, final / s.value < 0.1 ? 1 : 0)} of these)</>}
+              </span>
+            </p>
             {zoomed && <p className="mt-1 font-semibold uppercase tracking-widest text-accent">zooming in {Math.round(zoomed)}×</p>}
           </div>
         </div>
@@ -209,7 +198,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
             }}
             className="rounded-full bg-ink px-4 py-1.5 text-sm font-medium text-paper"
           >
-            {playing ? "Pause" : cur >= last ? "Replay" : cur === 0 ? "Start sifting" : "Resume"}
+            {playing ? "Pause" : cur >= last ? "Replay" : "Play all"}
           </button>
           <div className="flex overflow-hidden rounded-full border border-rule text-sm">
             <button
