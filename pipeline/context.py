@@ -158,8 +158,7 @@ logit = lambda p: math.log(p / (1 - p))  # noqa: E731
 
 pres = pd.read_csv(RAW / "pres2024_county.csv", dtype={"county_fips": str})
 pres["county_fips"] = pres.county_fips.str.zfill(5)
-pres["cbsa"] = pres.county_fips.map(county_to_cbsa)
-lean = pres.dropna(subset=["cbsa"]).groupby("cbsa")[["votes_dem", "votes_gop", "total_votes"]].sum()
+county_votes = pres.groupby("county_fips")[["votes_dem", "votes_gop", "total_votes"]].sum()
 state_lean = pres.groupby("state_name")[["votes_dem", "votes_gop", "total_votes"]].sum()
 
 # ------------------------------------------------------------------ markets
@@ -167,12 +166,12 @@ state_lean = pres.groupby("state_name")[["votes_dem", "votes_gop", "total_votes"
 idx = json.loads((OUT / "markets.json").read_text())
 fips_to_abbr = pd.read_csv(RAW / "Geos20245YR.txt", sep="|", dtype=str, usecols=["SUMLEVEL", "STATE", "STUSAB"])
 fips_to_abbr = dict(fips_to_abbr[fips_to_abbr.SUMLEVEL == "040"][["STATE", "STUSAB"]].values)
-counties_by_cbsa = deline.groupby("cbsa").county.apply(list).to_dict()
+market_counties = json.loads((ROOT / "market_counties.json").read_text())
 
 out_markets = {}
 for m in idx["markets"]:
     cb = m.get("cbsa")
-    counties = counties_by_cbsa.get(cb, [])
+    counties = market_counties[m["id"]]
     st_fips = pd.Series([c[:2] for c in counties]).mode()
     st = fips_to_abbr.get(st_fips.iloc[0]) if len(st_fips) else None
     if cb in metro_cbsa:
@@ -189,8 +188,9 @@ for m in idx["markets"]:
         "localSmoke": round(loc["smoke"], 3),
         "localObese": round(loc["obese"], 3),
     }
-    if cb in lean.index:
-        v = lean.loc[cb]
+    have = [c for c in counties if c in county_votes.index]
+    if have:
+        v = county_votes.loc[have].sum()
         two = v.votes_dem + v.votes_gop
         rec["dem"] = round(float(v.votes_dem / two), 3)
         rec["votes"] = int(v.total_votes)

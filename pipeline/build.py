@@ -2,12 +2,19 @@
 
 Inputs (pipeline/raw/): ACS 2020-2024 5-year table-based summary files, the
 2020-2024 5-year PUMS person file (as pums.parquet), the 2020 tract->PUMA
-relationship file and the July 2023 CBSA delineation file.
+relationship file, the July 2023 CBSA delineation file, Vintage 2025 CBSA and
+county population estimates, and the USDA ERS county typology (2025) and
+AWS Terrain Tiles elevations (terrain.py) for the preset sets.
+
+Markets are every CBSA (metro and micro area) plus every county outside one
+("rural" markets), so every place in the country belongs to exactly one.
 
 Outputs (web/public/data/):
-  markets.json   searchable index of markets and the places inside them
+  markets.json   searchable index of markets (with preset tags) and places
   global.json    division age shares, partner-age CDFs
   m/<id>.json    per-market counts (B12002) and PUMS attribute distributions
+Also pipeline/market_counties.json (market -> county FIPS) for context.py and
+religion.py.
 """
 
 import json
@@ -18,6 +25,8 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
+
+import terrain
 
 ROOT = Path(__file__).parent
 RAW = ROOT / "raw"
@@ -31,7 +40,6 @@ BINS = [(18, 19), (20, 24), (25, 29), (30, 34), (35, 39), (40, 44), (45, 49),
 # divorced, married (spouse present or otherwise absent).
 MARG = ["nm", "sep", "wid", "div", "mar"]
 SHRINK_K = 20.0  # pseudo-observations pulling sparse markets toward division
-MIN_STANDALONE_POP = 10_000
 
 con = duckdb.connect()
 
@@ -87,7 +95,7 @@ DIVISIONS = {
 state_div = {st: d for d, sts in DIVISIONS.items() for st in sts.split()}
 state_abbr = {r.STATE: r.STUSAB for r in geos[geos.SUMLEVEL == "040"].itertuples()}
 
-# Markets: every CBSA (outside Puerto Rico) plus sizable places outside CBSAs.
+# Markets: every CBSA (outside Puerto Rico) plus every county outside a CBSA.
 cbsas = geos[(geos.SUMLEVEL == "310") & ~geos.NAME.str.contains(", PR ")].copy()
 cbsas = cbsas[~cbsas.NAME.str.endswith("PR Metro Area") & ~cbsas.NAME.str.endswith("PR Micro Area")]
 
@@ -115,17 +123,56 @@ for r in cbsas.itertuples():
     markets.append(dict(id=f"{slug(name)}-{r.CBSA}", geo_id=r.GEO_ID, name=name, kind=kind,
                         pop=int(r.pop), counties=counties, division=divs.mode()[0],
                         cbsa=r.CBSA))
-standalone = places[places.cbsa.isna() & (places["pop"] >= MIN_STANDALONE_POP)]
-for r in standalone.itertuples():
-    name = re.sub(r" (city|town|village|borough|CDP|municipality)(?=,)", "", r.NAME)
-    st = state_abbr[r.STATE]
-    name = name.split(",")[0] + f", {st}"
-    markets.append(dict(id=f"{slug(name)}-{r.place}", geo_id=r.GEO_ID, name=name, kind="city",
+counties = geos[(geos.SUMLEVEL == "050") & (geos.STATE != "72")].copy()
+counties["county"] = counties.STATE + counties.COUNTY
+county_pop = dict(zip(counties.county, counties["pop"]))
+for r in counties[~counties.county.isin(county_cbsa.keys())].itertuples():
+    name = f"{r.NAME.split(',')[0]}, {state_abbr[r.STATE]}"
+    markets.append(dict(id=f"{slug(name)}-c{r.county}", geo_id=r.GEO_ID, name=name, kind="rural",
                         pop=int(r.pop), counties=[r.county], division=state_div[r.STATE],
-                        place=r.place))
+                        county=r.county))
 mk = pd.DataFrame(markets)
 print(f"  {len(mk)} markets ({(mk.kind == 'metro').sum()} metro, "
-      f"{(mk.kind == 'micro').sum()} micro, {(mk.kind == 'city').sum()} standalone places)")
+      f"{(mk.kind == 'micro').sum()} micro, {(mk.kind == 'rural').sum()} rural counties)")
+
+# ------------------------------------------------------------- preset sets
+
+# Resort and retirement sets are defined per county (USDA ERS County Typology
+# Codes, 2025 edition: recreation-dependent, retirement destination) and a
+# market is in one when counties holding most of its population are. Mountain
+# towns are set further down, from the places themselves.
+ers = pd.read_csv(RAW / "ers-typology-2025.csv", dtype=str)
+ers = ers.pivot_table(index="FIPStxt", columns="Attribute", values="Value", aggfunc="first")
+enr = read_table("B14001").set_index("GEO_ID")
+students = num(enr["B14001_E008"]) + num(enr["B14001_E009"])  # undergrad + grad
+county_flags = {}
+for c in counties.county:
+    e = ers.loc[c] if c in ers.index else None
+    county_flags[c] = dict(
+        resort=e is not None and e.get("High_Recreation_2025") == "1",
+        retire=e is not None and e.get("Retirement_Destination_2025") == "1",
+    )
+COLLEGE_SHARE = 0.15  # college and grad students per resident (US: about 6%)
+BIG_CITY = 1_000_000
+for m in markets:
+    w = np.array([county_pop.get(c, 0) or 0 for c in m["counties"]], dtype=float)
+    w = w / w.sum() if w.sum() > 0 else np.full(len(w), 1 / len(w))
+    share = lambda k: float(sum(wi for wi, c in zip(w, m["counties"]) if county_flags.get(c, {}).get(k)))  # noqa: E731
+    tags = []
+    if share("resort") > 0.5:
+        tags.append("resort")
+    if share("retire") > 0.5:
+        tags.append("retire")
+    st_ = students.get(m["geo_id"], 0)
+    if m["pop"] and st_ / m["pop"] >= COLLEGE_SHARE:
+        tags.append("college")
+    if m["kind"] == "metro" and m["pop"] >= BIG_CITY:
+        tags.append("big")
+    if m["kind"] != "metro":
+        tags.append("small")
+    m["tags"] = tags
+for t in ("resort", "retire", "college", "big", "small"):
+    print(f"  {t}: {sum(t in m['tags'] for m in markets)}")
 
 # ------------------------------------------------------ PUMA -> market weights
 
@@ -324,6 +371,30 @@ pep = con.execute(f"""
 pep_by = {c: g.set_index("age") for c, g in pep.groupby("cbsa")}
 PEP_VINTAGE = "Vintage 2025 population estimates (July 1, 2025)"
 
+# Counties only come in five-year groups, so rural markets are raked group by
+# group against the matching ACS B01001 lines (male lines; female = +24).
+cc = con.execute(f"""
+  select lpad(STATE::varchar, 2, '0') || lpad(COUNTY::varchar, 3, '0') county, *
+  from read_csv('{RAW}/cc-est2025-agesex-all.csv', all_varchar=true, encoding='latin-1') where YEAR = '7'
+""").df().set_index("county")
+BIN_PEP = [(["1519"], [6, 7]), (["2024"], [8, 9, 10]), (["2529"], [11]), (["3034"], [12]),
+           (["3539"], [13]), (["4044"], [14]), (["4549"], [15]), (["5054"], [16]), (["5559"], [17]),
+           (["6064"], [18, 19]), (["6569", "7074"], [20, 21, 22]), (["7579", "8084"], [23, 24]),
+           (["85PLUS"], [25])]
+
+
+def county_factors(county: str, geo: str, sex: int) -> list[float] | None:
+    if county not in cc.index:
+        return None
+    row = cc.loc[county]
+    sx = "MALE" if sex == 1 else "FEM"
+    out = []
+    for groups, lines in BIN_PEP:
+        pe = sum(float(row[f"AGE{g}_{sx}"]) for g in groups)
+        acs = sum(b01.at[geo, f"B01001_E{ln + (0 if sex == 1 else 24):03d}"] for ln in lines)
+        out.append(pe / acs if acs > 0 else 1.0)
+    return out
+
 
 def cell_est(geo: str, sex: int, marg: str, bin_i: int) -> tuple[float, float]:
     est = moe2 = 0.0
@@ -345,24 +416,30 @@ for m in markets:
         continue
     d = int(m["division"])
     pe = pep_by.get(m.get("cbsa"))
+    cty = cc.loc[m["county"]] if m.get("county") in cc.index else None
+    if pe is not None:
+        sex_pop = {"1": int(pe.m.sum()), "2": int(pe.f.sum())}
+    elif cty is not None:
+        sex_pop = {"1": int(cty.POPEST_MALE), "2": int(cty.POPEST_FEM)}
+    else:
+        sex_pop = {"1": int(b01.at[geo, "B01001_E002"]), "2": int(b01.at[geo, "B01001_E026"])}
     shard = dict(id=m["id"], name=m["name"], kind=m["kind"], division=d,
-                 pop=int(pe.m.sum() + pe.f.sum()) if pe is not None else m["pop"],
-                 sexPop={"1": int(pe.m.sum()) if pe is not None else int(b01.at[geo, "B01001_E002"]),
-                         "2": int(pe.f.sum()) if pe is not None else int(b01.at[geo, "B01001_E026"])},
+                 pop=sex_pop["1"] + sex_pop["2"], sexPop=sex_pop,
                  counts={}, moe={}, attrs={}, neff={}, race={})
     for sex in (1, 2):
         s = str(sex)
         shard["counts"][s], shard["moe"][s] = {}, {}
         shard["attrs"][s], shard["neff"][s], shard["race"][s] = {}, {}, {}
         # 2025 / ACS factor per age bin for this sex.
-        factor = []
-        for i, (lo, hi) in enumerate(BINS):
+        factor = [] if pe is not None else county_factors(m.get("county", ""), geo, sex)
+        for i, (lo, hi) in enumerate(BINS if factor is not None else []):
             acs = sum(cell_est(geo, sex, mg, i)[0] for mg in MARG)
             if pe is None or acs <= 0:
                 factor.append(1.0)
                 continue
             col = pe["m" if sex == 1 else "f"]
             factor.append(float(col.loc[lo:min(hi, 85)].sum()) / acs)
+        factor = factor or [1.0] * len(BINS)
         for mi, mg in enumerate(MARG):
             est_moe = [cell_est(geo, sex, mg, i) for i in range(len(BINS))]
             shard["counts"][s][mg] = [round(e * factor[i]) for i, (e, _) in enumerate(est_moe)]
@@ -385,18 +462,25 @@ for m in markets:
                 R.append([round(float(x), 4) for x in pr])
             shard["race"][s][mg] = R
     (OUT / "m" / f"{m['id']}.json").write_text(json.dumps(shard, separators=(",", ":")))
-    index.append(dict(id=m["id"], name=m["name"], kind=m["kind"], pop=shard["pop"], cbsa=m.get("cbsa")))
+    entry = dict(id=m["id"], name=m["name"], kind=m["kind"], pop=shard["pop"], tags=m["tags"])
+    if m.get("cbsa"):
+        entry["cbsa"] = m["cbsa"]
+    else:
+        entry["county"] = m["county"]
+    index.append(entry)
 
-# Searchable places: every place >= 2,500 people that maps to a market.
+# Searchable places: every place of 2,500+ people, and in micro areas and
+# rural counties (where a ski town can have 1,500) every place of 300+.
 by_cbsa = {m["cbsa"]: m["id"] for m in markets if "cbsa" in m}
-by_place = {m["place"]: m["id"] for m in markets if "place" in m}
+by_county = {m["county"]: m["id"] for m in markets if "county" in m}
+kind_of = {m["id"]: m["kind"] for m in markets}
 gaz = pd.read_csv(RAW / "2026_Gaz_place_national.txt", sep="|", dtype={"GEOID": str})
 gaz.columns = [c.strip() for c in gaz.columns]
 latlon = {g: (round(la, 3), round(lo, 3)) for g, la, lo in zip(gaz.GEOID, gaz.INTPTLAT, gaz.INTPTLONG)}
 plist = []
-for r in places[places["pop"] >= 2500].itertuples():
-    mid = by_place.get(r.place) or (by_cbsa.get(r.cbsa) if isinstance(r.cbsa, str) else None)
-    if not mid:
+for r in places[places["pop"] >= 300].itertuples():
+    mid = by_cbsa.get(r.cbsa) if isinstance(r.cbsa, str) else by_county.get(r.county)
+    if not mid or (r.pop < 2500 and kind_of[mid] == "metro"):
         continue
     nm = re.sub(r" (city|town|village|borough|CDP|municipality|city and borough|"
                 r"urban county|metropolitan government \(balance\)|"
@@ -407,10 +491,28 @@ for r in places[places["pop"] >= 2500].itertuples():
     plist.append([nm.split(",")[0], state_abbr[r.STATE], mid, int(r.pop), la, lo])
 plist.sort(key=lambda x: -x[3])
 
+# Mountain towns: markets under half a million where most people living in
+# the listed places live in mountainous terrain (Kapos et al. 2000; see
+# terrain.py). Evaluated at each place rather than per county, since a county
+# like Yuma or Los Angeles can be mountainous while its towns are not.
+MOUNTAIN_TOWN_MAX = 500_000
+located = [pl for pl in plist if pl[4] is not None]
+mtn = terrain.classify([(pl[4], pl[5]) for pl in located])
+tot: dict[str, float] = {}
+up: dict[str, float] = {}
+for pl, t in zip(located, mtn):
+    tot[pl[2]] = tot.get(pl[2], 0) + pl[3]
+    up[pl[2]] = up.get(pl[2], 0) + (pl[3] if t["mountain"] else 0)
+for e in index:
+    if e["pop"] < MOUNTAIN_TOWN_MAX and tot.get(e["id"]) and up[e["id"]] / tot[e["id"]] > 0.5:
+        e["tags"].insert(0, "mountain")
+print(f"  mountain: {sum('mountain' in e['tags'] for e in index)}")
+
 (OUT / "markets.json").write_text(json.dumps(
     dict(year=f"ACS 2020-{YEAR} 5-year, scaled to {PEP_VINTAGE}", markets=index, places=plist),
     separators=(",", ":")))
 (OUT / "global.json").write_text(json.dumps(
     dict(bins=BINS, marg=MARG, ageMin=AGE_MIN, ageMax=AGE_MAX,
          ageShares=age_shares, partnerCdf=cdfs), separators=(",", ":")))
+(ROOT / "market_counties.json").write_text(json.dumps({m["id"]: m["counties"] for m in markets}))
 print(f"  wrote {len(index)} markets, {len(plist)} places")

@@ -103,11 +103,9 @@ for r in pew.itertuples():
         shares.append(round(math.log(max(p, 0.05) / max(p_nat, 0.05)), 3))
     shift_of[r.geo_code] = shares
 idx = json.loads((OUT / "markets.json").read_text())
-deline = pd.read_excel(RAW / "list1_2023.xlsx", header=2).dropna(subset=["FIPS County Code"])
-deline["cbsa"] = deline["CBSA Code"].astype(str)
-st_of_cbsa = deline.groupby("cbsa")["State Name"].agg(lambda s: s.mode().iloc[0]).to_dict()
-abbr = pd.read_csv(RAW / "Geos20245YR.txt", sep="|", dtype=str, usecols=["SUMLEVEL", "NAME", "STUSAB"])
-name_to_abbr = dict(abbr[abbr.SUMLEVEL == "040"][["NAME", "STUSAB"]].values)
+market_counties = json.loads((ROOT / "market_counties.json").read_text())
+abbr = pd.read_csv(RAW / "Geos20245YR.txt", sep="|", dtype=str, usecols=["SUMLEVEL", "STATE", "STUSAB"])
+fips_to_abbr = dict(abbr[abbr.SUMLEVEL == "040"][["STATE", "STUSAB"]].values)
 markets = {}
 src = {"metro": 0, "state": 0}
 for m_ in idx["markets"]:
@@ -116,7 +114,8 @@ for m_ in idx["markets"]:
         markets[m_["id"]] = shift_of[cb]
         src["metro"] += 1
         continue
-    st = name_to_abbr.get(st_of_cbsa.get(cb, ""))
+    sts = pd.Series([c[:2] for c in market_counties[m_["id"]]]).mode()
+    st = fips_to_abbr.get(sts.iloc[0]) if len(sts) else None
     if st in shift_of:
         markets[m_["id"]] = shift_of[st]
         src["state"] += 1
