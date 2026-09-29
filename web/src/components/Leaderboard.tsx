@@ -5,6 +5,7 @@ import type { RankResponse, RankRow, Sort } from "@/app/api/rank/route";
 import { noun, type Query } from "@/lib/model";
 import { fmt } from "@/lib/format";
 import MetroChart from "./MetroChart";
+import MetroMap from "./MetroMap";
 
 const MODES: { key: Sort; label: string; by: string; blurb: string }[] = [
   {
@@ -41,7 +42,7 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
   useEffect(() => {
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      fetch(`/api/rank?v=5&${qs}`, { signal: ctrl.signal })
+      fetch(`/api/rank?v=6&${qs}`, { signal: ctrl.signal })
         .then((r) => r.json())
         .then(setData)
         .catch(() => {});
@@ -98,6 +99,15 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
           adjusted #{data.you.rank.adjusted}, odds #{data.you.rank.odds}).
         </p>
       )}
+
+      {data?.all?.length ? (
+        <MetroMap data={data} sort={sort} current={query.market} onPick={pick} />
+      ) : (
+        <div className="mt-6 aspect-[1.6] w-full rounded-lg bg-rule/20" />
+      )}
+      <p className="mt-2 max-w-xl text-xs text-muted">
+        Every metro for your exact search. Your metro is outlined. Hover for numbers; click to go there.
+      </p>
 
       {data?.all?.length ? (
         <MetroChart data={data} sort={sort} current={query.market} onPick={pick} />

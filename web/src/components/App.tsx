@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Choice } from "@/lib/competition";
-import { compute, noun, type Global, type Query, type Result, type Shard } from "@/lib/model";
+import { compute, LOW_RECORDS, mergeContext, noun, type Global, type Query, type Result, type Shard } from "@/lib/model";
 import { approx, shortCity } from "@/lib/format";
 import { serializeQuery } from "@/lib/query";
 import QueryForm from "./QueryForm";
 import Sieve from "./Sieve";
 import Receipts from "./Receipts";
 import Verdict from "./Verdict";
+import WhoIsLeft from "./WhoIsLeft";
 import Competition from "./Competition";
 import Leaderboard from "./Leaderboard";
 import Method from "./Method";
@@ -83,7 +84,10 @@ export default function App({
 
   useEffect(() => {
     (staticPromise ??= Promise.all([
-      fetch("/data/global.json").then((r) => r.json()),
+      Promise.all([
+        fetch("/data/global.json").then((r) => r.json()),
+        fetch("/data/context.json").then((r) => r.json()),
+      ]).then(([g, c]) => mergeContext(g, c)),
       fetch("/data/choice.json").then((r) => r.json()),
     ])).then(setData);
   }, []);
@@ -126,9 +130,10 @@ export default function App({
 
       <QueryForm query={query} marketName={result.market.name} onChange={setQuery} />
       <LocateLine located={located} onMarket={(market) => setQuery((q) => ({ ...q, market }))} />
-      <Sieve key={sieveKey} steps={result.steps} />
-      <Receipts steps={result.steps} />
+      <Sieve key={sieveKey} steps={result.steps} thin={result.records < LOW_RECORDS} />
+      <Receipts steps={result.steps} thin={result.records < LOW_RECORDS} records={result.records} />
       <Verdict result={result} query={query} />
+      <WhoIsLeft result={result} query={query} dataYear={dataYear} />
       <Competition result={result} query={query} onYou={(you) => setQuery((q) => ({ ...q, you }))} />
       <Leaderboard qs={qs} query={query} onPick={(market) => setQuery((q) => ({ ...q, market }))} />
       <Method dataYear={dataYear} />

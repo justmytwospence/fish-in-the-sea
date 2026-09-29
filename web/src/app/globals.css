@@ -10,6 +10,8 @@
   --accent-soft: #f0d2c7;
   --census: #2b2722;
   --model: #c8412a;
+  --cool: #1f6fb2;
+  --warm: #c8412a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,6 +25,8 @@
     --accent-soft: #4a261d;
     --census: #e6dfd2;
     --model: #ff7556;
+    --cool: #3d97e0;
+    --warm: #f0603f;
   }
 }
 
@@ -36,6 +40,7 @@
   --color-accent-soft: var(--accent-soft);
   --color-census: var(--census);
   --color-model: var(--model);
+  --color-cool: var(--cool);
   --font-sans: var(--font-inter);
   --font-display: var(--font-fraunces);
 }
