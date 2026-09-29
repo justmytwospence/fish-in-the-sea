@@ -40,6 +40,7 @@ export function parseQuery(p: Params): Query {
     neverMarried: f.has("nm"),
     edu: f.has("grad") ? 2 : f.has("ba") ? 1 : 0,
     noKids: f.has("nokids"),
+    height: f.has("hle") ? "le" : f.has("hge") ? "ge" : f.has("hany") ? "any" : undefined,
   };
   const m = new Set((get(p, "m") ?? "").split(",").filter(Boolean));
   q.model = {
@@ -75,6 +76,7 @@ export function serializeQuery(q: Query): string {
     q.filters.edu === 1 && "ba",
     q.filters.edu === 2 && "grad",
     q.filters.noKids && "nokids",
+    q.filters.height && `h${q.filters.height}`,
   ].filter(Boolean);
   if (f.length) p.set("f", f.join(","));
   const m = [

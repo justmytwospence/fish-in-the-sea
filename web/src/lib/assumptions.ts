@@ -142,6 +142,20 @@ export function heightDist(sex: Sex, age: number): { mean: number; sd: number } 
   return age < 40 ? { mean: 64.0, sd: 2.7 } : age < 60 ? { mean: 63.7, sd: 2.7 } : { mean: 62.7, sd: 2.6 };
 }
 
+function normCdf(z: number): number {
+  // Abramowitz & Stegun 7.1.26
+  const t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2);
+  const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(z * z) / 2);
+  return z >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+}
+
+// Share of people of `sex` and `age` no taller ("le") or no shorter ("ge")
+// than `h` inches, treating reported heights as rounded to the inch.
+export function heightShare(sex: Sex, age: number, h: number, dir: "le" | "ge"): number {
+  const { mean, sd } = heightDist(sex, age);
+  return dir === "le" ? normCdf((h + 0.5 - mean) / sd) : 1 - normCdf((h - 0.5 - mean) / sd);
+}
+
 // Relative appeal (log scale) of a candidate's height to a chooser, from the
 // first-contact probits in Hitsch, Hortacsu & Ariely (2010), cross-checked
 // against Stulp et al. (2013). Women: each inch he is shorter than her costs

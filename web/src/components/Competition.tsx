@@ -151,7 +151,7 @@ export default function Competition({
   else if (fs < 1.5) verdict = "Roughly a fair share.";
   else verdict = "The market is tilted your way.";
 
-  const heights = Array.from({ length: 25 }, (_, i) => 58 + i);
+  const heights = Array.from({ length: 31 }, (_, i) => 56 + i);
   const oppositeSex = query.me.sex !== query.seek.sex;
 
   return (

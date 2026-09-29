@@ -1,7 +1,7 @@
 "use client";
 
 import type { Sex } from "@/lib/assumptions";
-import type { Query } from "@/lib/model";
+import { heightDefault, type Query } from "@/lib/model";
 import CityPicker from "./CityPicker";
 
 const ages = Array.from({ length: 73 }, (_, i) => i + 18);
@@ -23,6 +23,27 @@ function SexSelect({ value, onChange, label, article }: { value: Sex; onChange: 
     <select className="field" aria-label={label} value={value} onChange={(e) => onChange(+e.target.value as Sex)}>
       <option value={1}>{article ? "man" : "men"}</option>
       <option value={2}>{article ? "woman" : "women"}</option>
+    </select>
+  );
+}
+
+const heights = Array.from({ length: 31 }, (_, i) => i + 56); // 4'8" to 7'2"
+const ft = (h: number) => `${Math.floor(h / 12)}′${h % 12}″`;
+
+function HeightSelect({ value, onChange }: { value: number | undefined; onChange: (h: number | undefined) => void }) {
+  return (
+    <select
+      className={`field ${value === undefined ? "opacity-60" : ""}`}
+      aria-label="Your height (optional)"
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value === "" ? undefined : +e.target.value)}
+    >
+      <option value="">height?</option>
+      {heights.map((h) => (
+        <option key={h} value={h}>
+          {ft(h)}
+        </option>
+      ))}
     </select>
   );
 }
@@ -60,7 +81,10 @@ export default function QueryForm({
       <p className="font-display text-2xl leading-[1.7] sm:text-[1.7rem]">
         I&apos;m a <AgeSelect label="Your age" value={query.me.age} onChange={(age) => set({ me: { ...query.me, age } })} />
         -year-old{" "}
-        <SexSelect label="Your sex" article value={query.me.sex} onChange={(sex) => set({ me: { ...query.me, sex } })} /> in{" "}
+        <SexSelect label="Your sex" article value={query.me.sex} onChange={(sex) => set({ me: { ...query.me, sex } })} />
+        {query.you.height !== undefined ? ", " : " "}
+        <HeightSelect value={query.you.height} onChange={(height) => set({ you: { ...query.you, height } })} />
+        {query.you.height !== undefined ? " tall," : ""} in{" "}
         <CityPicker marketName={marketName} onPick={(market) => set({ market })} /> looking for{" "}
         <SexSelect label="Who you're looking for" value={query.seek.sex} onChange={(sex) => set({ seek: { ...query.seek, sex } })} /> aged{" "}
         <AgeSelect label="Youngest" value={query.seek.lo} onChange={(lo) => set({ seek: { ...query.seek, lo, hi: Math.max(lo, query.seek.hi) } })} />
@@ -82,6 +106,29 @@ export default function QueryForm({
         <Chip on={f.noKids} onClick={() => set({ filters: { ...f, noKids: !f.noKids } })}>
           no kids at home
         </Chip>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-sm text-muted">Their height:</span>
+        {query.you.height === undefined ? (
+          <span className="text-sm text-muted">pick your height above to filter by it</span>
+        ) : (
+          (
+            [
+              ["le", `no taller than ${ft(query.you.height)}`],
+              ["ge", `at least ${ft(query.you.height)}`],
+              ["any", "doesn't matter"],
+            ] as const
+          ).map(([dir, label]) => (
+            <Chip
+              key={dir}
+              on={(f.height ?? heightDefault(query)) === dir}
+              onClick={() => set({ filters: { ...f, height: dir === heightDefault(query) ? undefined : dir } })}
+            >
+              {label}
+            </Chip>
+          ))
+        )}
       </div>
 
       <details className="group mt-4 text-sm">

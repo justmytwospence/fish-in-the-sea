@@ -1,5 +1,6 @@
 import {
   attraction,
+  heightShare,
   inRelationship,
   looking,
   SOURCES,
@@ -39,7 +40,9 @@ export interface Query {
   market: string;
   me: { sex: Sex; age: number };
   seek: { sex: Sex; lo: number; hi: number };
-  filters: { neverMarried: boolean; edu: 0 | 1 | 2; noKids: boolean };
+  // height: whether they must be no taller (le) or no shorter (ge) than you;
+  // undefined means the default for this pairing (see heightFilter).
+  filters: { neverMarried: boolean; edu: 0 | 1 | 2; noKids: boolean; height?: "le" | "ge" | "any" };
   model: {
     separated: boolean; // count separated people as available
     orientation: boolean;
@@ -81,6 +84,20 @@ export const cellOf = (c: number) => ({
   kids: Math.floor((c % 8) / 4),
   inc: c % 4,
 });
+
+// Default height rule: men seeking women want them no taller, women seeking
+// men want them no shorter; no default for same-sex searches.
+export function heightDefault(q: Query): "le" | "ge" | "any" {
+  if (q.me.sex === 1 && q.seek.sex === 2) return "le";
+  if (q.me.sex === 2 && q.seek.sex === 1) return "ge";
+  return "any";
+}
+
+export function heightFilter(q: Query): "le" | "ge" | null {
+  if (q.you.height === undefined) return null;
+  const dir = q.filters.height ?? heightDefault(q);
+  return dir === "any" ? null : dir;
+}
 
 function marital(q: Query, withFilters: boolean): UMarg[] {
   if (withFilters && q.filters.neverMarried) return ["nm"];
@@ -134,6 +151,7 @@ function pool(
 ) {
   const sx = String(sex) as "1" | "2";
   const shares = g.ageShares[String(s.division)][sx];
+  const hf = withFilters ? heightFilter(q) : null;
   const available = marital(q, false);
   const margs = marital(q, withFilters);
   const masks = {
@@ -148,6 +166,7 @@ function pool(
     neverMarried: acc(),
     edu: acc(),
     kids: acc(),
+    height: acc(),
     orientation: acc(),
     relationship: acc(),
     looking: acc(),
@@ -181,10 +200,12 @@ function pool(
       // Survey-based factors vary by single year of age: average them over
       // the ages in this bin, weighted by the age shares.
       const avg = (f: (a: number) => number) => ages.reduce((t, a, i) => t + sh[i] * f(a), 0) / S;
-      const fo = (a: number) => (q.model.orientation ? attraction(sex, towards, a) : 1);
+      const fh = (a: number) => (hf ? heightShare(sex, a, q.you.height!, hf) : 1);
+      const fo = (a: number) => fh(a) * (q.model.orientation ? attraction(sex, towards, a) : 1);
       const fr = (a: number) => fo(a) * (q.model.relationship ? 1 - inRelationship(a) : 1);
       const fl = (a: number) => fr(a) * (q.model.looking ? looking(sex, a) : 1);
       const spark = q.model.spark > 0 ? q.model.spark : 1;
+      add(out.height, C, varC, pKids, n, avg(fh));
       add(out.orientation, C, varC, pKids, n, avg(fo));
       add(out.relationship, C, varC, pKids, n, avg(fr));
       add(out.looking, C, varC, pKids, n, avg(fl));
@@ -244,6 +265,14 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
       T === 1
         ? "Own children under 18 in the household. For men this is inferred from household relationships and misses children who live elsewhere, which is common after divorce."
         : "Own children under 18 in the household. Children who live elsewhere don't show up.");
+  const hf = heightFilter(q);
+  if (hf) {
+    const h = q.you.height!;
+    const ht = `${Math.floor(h / 12)}′${h % 12}″`;
+    push("height", hf === "le" ? `No taller than you (${ht})` : `At least as tall as you (${ht})`,
+      hf === "le" ? "taller than you" : "shorter than you", t.height, "survey", [SOURCES.nhanes],
+      "Share of this sex and age at or under (or over) your height, from CDC NHANES 2015-2018 height distributions. Assumes height is unrelated to the other steps.");
+  }
   if (q.model.orientation)
     push("orientation", `Into ${noun(M)}`, `not into ${noun(M)}`, t.orientation, "survey", [SOURCES.gallup, SOURCES.nsfg],
       "National rates by sex and age (not local). Bisexual people count as attracted to both.");
