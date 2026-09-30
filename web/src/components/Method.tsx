@@ -82,19 +82,19 @@ export default function Method({ dataYear }: { dataYear: string }) {
           segregation, social networks and history as much as anyone&apos;s preferences.
         </p>
         <p>
-          <strong>Religion.</strong> The Census doesn&apos;t ask about religion. The optional filter starts from the
-          religious identification of unmarried adults by sex and age in the <Src s={SOURCES.gss} /> (2016–2024),
-          then shifts it by how the metro or state differs from the US (<Src s={SOURCES.religionLocal} />). It&apos;s
-          applied as independent of everything else. In the competition model, religious pairing comes from married
-          couples under 45 in the GSS, relative to random pairing.
-        </p>
-        <p>
-          <strong>Politics.</strong> Party identification (with leaners counted as partisans) of unmarried adults by
-          sex and age from the <Src s={SOURCES.gss} /> (2016–2024), with the Democratic-versus-Republican odds
-          shifted by how the metro voted in 2024 relative to the country (<Src s={SOURCES.election} />). Political
-          pairing in the competition model comes from both partners&apos; party in{" "}
-          <Src s={SOURCES.hcmstPolitics} />, relative to random pairing. Like religion, it&apos;s applied as independent
-          of the other filters.
+          <strong>Religion and politics.</strong> The Census asks about neither. Both come from one model of the{" "}
+          <Src s={SOURCES.ces} />: religion for unmarried adults by sex, age, education and race/ethnicity, and party
+          (leaners counted as partisans) given all of those plus religion, with the religion–party link allowed to
+          differ by race (white and Black Protestants vote very differently). So a degree, race or religion filter
+          changes who&apos;s left politically, and vice versa. The national religion level is calibrated to Pew&apos;s
+          2023–24 Religious Landscape Study, since the CES panel runs less religious. Each place is then shifted by
+          how its religious mix (Pew&apos;s metro figures where they exist, else its state&apos;s, plus the CES
+          respondents who live there, the unmarried ones most) and its 2024 vote (<Src s={SOURCES.election} />)
+          differ from the US beyond what its make-up already explains. Where one religion dominates and its members
+          marry young (Latter-day Saints in Utah), estimates for young singles are rough. In the competition model,
+          religious pairing comes from married couples under 45 in the <Src s={SOURCES.gss} /> and political
+          pairing from both partners&apos; party in <Src s={SOURCES.hcmstPolitics} />, each relative to random
+          pairing.
         </p>
         <p>
           <strong>Kids someday.</strong> Unpartnered adults answering &ldquo;Do you, yourself, want to have a(nother)

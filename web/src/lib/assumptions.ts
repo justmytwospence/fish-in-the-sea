@@ -171,6 +171,10 @@ export const SOURCES = {
     label: "Stanford How Couples Meet and Stay Together 2017 (partners' party)",
     url: "https://data.stanford.edu/hcmst2017",
   },
+  ces: {
+    label: "Cooperative Election Study 2024 (60,000 adults)",
+    url: "https://doi.org/10.7910/DVN/X11EP6",
+  },
   religionLocal: {
     label: "Local religious composition (see methodology)",
     url: "https://www.pewresearch.org/religious-landscape-study/",

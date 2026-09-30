@@ -2,7 +2,16 @@ import "server-only";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Choice } from "./competition";
-import { mergeContext, type Context, type Global, type KidsData, type PoliticsData, type ReligionData, type Shard } from "./model";
+import {
+  mergeContext,
+  type BeliefsData,
+  type Context,
+  type Global,
+  type KidsData,
+  type PoliticsData,
+  type ReligionData,
+  type Shard,
+} from "./model";
 
 const DIR = path.join(process.cwd(), "public", "data");
 
@@ -29,7 +38,8 @@ export function loadGlobal() {
     json<ReligionData>("religion.json"),
     json<PoliticsData>("politics.json"),
     json<KidsData>("kids.json"),
-  ]).then(([g, c, r, p, k]) => mergeContext(g, c, r, p, k)));
+    json<BeliefsData>("beliefs.json"),
+  ]).then(([g, c, r, p, k, b]) => mergeContext(g, c, r, p, k, b)));
 }
 
 export function loadChoice() {

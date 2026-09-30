@@ -78,6 +78,7 @@ export interface Global {
   religion?: ReligionData;
   politics?: PoliticsData;
   kids?: KidsData;
+  beliefs?: BeliefsData;
 }
 
 export interface Query {
@@ -182,8 +183,23 @@ export interface KidsData {
   rates: Record<"1" | "2", number[][][][]>; // [band][has kids][edu][WANT_KIDS]
 }
 
-export function mergeContext(g: Global, c: Context, r?: ReligionData, pol?: PoliticsData, kids?: KidsData): Global {
-  return { ...g, health: c.health, ctx: c.markets, religion: r, politics: pol, kids };
+// Shape of beliefs.json (see pipeline/beliefs.py): religion x party.
+export interface BeliefsData {
+  bands: [number, number][];
+  joint: Record<"1" | "2", number[][][][]>; // [band][edu][race][religion * 3 + party], unmarried
+  rel: Record<string, number[]>; // local log shift per religion
+  pol: Record<string, number>; // local log-odds shift, Democratic vs Republican
+}
+
+export function mergeContext(
+  g: Global,
+  c: Context,
+  r?: ReligionData,
+  pol?: PoliticsData,
+  kids?: KidsData,
+  beliefs?: BeliefsData,
+): Global {
+  return { ...g, health: c.health, ctx: c.markets, religion: r, politics: pol, kids, beliefs };
 }
 
 export const NCELL = 97;
@@ -390,6 +406,67 @@ function pool(
     return v.map((x) => x / tot);
   };
   const polPicked = withFilters && f.politics.length ? f.politics : null;
+  // Religion and party together (CES 2024), by age band, education and race,
+  // with this place's shifts beyond its make-up: joint[religion * 3 + party].
+  const B = g.beliefs;
+  const beliefCache = new Map<number, Float64Array>();
+  const beliefsFor = (a: number, edu: number, race: number) => {
+    if (!B) return null;
+    const bi = Math.max(0, B.bands.findIndex(([blo, bhi]) => a >= blo && a <= bhi));
+    const k = (bi * 3 + edu) * NRACE + race;
+    let j = beliefCache.get(k);
+    if (j) return j;
+    const base = B.joint[sx][bi][edu][race];
+    const rs = B.rel[s.id];
+    const ps = (B.pol[s.id] ?? 0) / 2;
+    j = new Float64Array(NREL * NPOL);
+    let tot = 0;
+    for (let r = 0; r < NREL; r++) {
+      let pr = 0;
+      for (let pt = 0; pt < NPOL; pt++) pr += base[r * NPOL + pt];
+      // Party within religion, tilted by the local vote; religion by the
+      // local mix.
+      const t = [base[r * NPOL] * Math.exp(ps), base[r * NPOL + 1], base[r * NPOL + 2] * Math.exp(-ps)];
+      const ts = t[0] + t[1] + t[2] || 1;
+      const rr = pr * Math.exp(rs?.[r] ?? 0);
+      for (let pt = 0; pt < NPOL; pt++) {
+        j[r * NPOL + pt] = (rr * t[pt]) / ts;
+        tot += j[r * NPOL + pt];
+      }
+    }
+    for (let x = 0; x < j.length; x++) j[x] /= tot || 1;
+    beliefCache.set(k, j);
+    return j;
+  };
+  const relKeep = Array.from({ length: NREL }, (_, r) => !relPicked || relPicked.includes(r));
+  const polKeep = Array.from({ length: NPOL }, (_, pt) => !polPicked || polPicked.includes(pt));
+  const relOk = (r: number) => relKeep[r];
+  const polOk = (pt: number) => polKeep[pt];
+  // Religion and party shares among those who pass your picks, by age band,
+  // education and race (for who's left and the competition model).
+  const leftCache = new Map<number, [Float64Array, Float64Array] | null>();
+  const beliefsLeft = (a: number, edu: number, race: number) => {
+    const bi = Math.max(0, B!.bands.findIndex(([blo, bhi]) => a >= blo && a <= bhi));
+    const k = (bi * 3 + edu) * NRACE + race;
+    if (leftCache.has(k)) return leftCache.get(k)!;
+    const j = beliefsFor(a, edu, race)!;
+    const rel = new Float64Array(NREL);
+    const pol = new Float64Array(NPOL);
+    let tot = 0;
+    for (let r = 0; r < NREL; r++) {
+      if (!relKeep[r]) continue;
+      for (let pt = 0; pt < NPOL; pt++) {
+        if (!polKeep[pt]) continue;
+        const x = j[r * NPOL + pt];
+        rel[r] += x;
+        pol[pt] += x;
+        tot += x;
+      }
+    }
+    const res: [Float64Array, Float64Array] | null = tot > 0 ? [rel.map((x) => x / tot), pol.map((x) => x / tot)] : null;
+    leftCache.set(k, res);
+    return res;
+  };
   const fPol = (a: number) => {
     if (!polPicked) return 1;
     const m = polMix(a);
@@ -533,8 +610,42 @@ function pool(
       const surveySteps: SurveyStep[] = [
         hf ? { group: (a, gr) => heightRangeShare(sex, a, hf.lo, hf.hi, heightFor(g, sex, a, gr.race)), ...byRace } : off,
         withFilters && f.nonSmoker ? { group: (a, gr) => fSmoke(a, gr.edu >= 1 ? 1 : 0, gr.race), ...byDegreeRace } : off,
-        { age: (a) => fRel(a) },
-        { age: (a) => fPol(a) },
+        B
+          ? relPicked
+            ? {
+                group: (a, gr) => {
+                  const j = beliefsFor(a, gr.edu, gr.race)!;
+                  let t = 0;
+                  for (const r of relPicked) for (let pt = 0; pt < NPOL; pt++) t += j[r * NPOL + pt];
+                  return t;
+                },
+                key: (gr) => gr.edu * NRACE + gr.race,
+                keys: 3 * NRACE,
+              }
+            : off
+          : { age: (a) => fRel(a) },
+        B
+          ? polPicked
+            ? {
+                // Among those who passed the religion step.
+                group: (a, gr) => {
+                  const j = beliefsFor(a, gr.edu, gr.race)!;
+                  let num = 0;
+                  let den = 0;
+                  for (let r = 0; r < NREL; r++) {
+                    if (!relOk(r)) continue;
+                    for (let pt = 0; pt < NPOL; pt++) {
+                      den += j[r * NPOL + pt];
+                      if (polOk(pt)) num += j[r * NPOL + pt];
+                    }
+                  }
+                  return den > 0 ? num / den : 1;
+                },
+                key: (gr) => gr.edu * NRACE + gr.race,
+                keys: 3 * NRACE,
+              }
+            : off
+          : { age: (a) => fPol(a) },
         wantPicked
           ? {
               group: (a, gr) => {
@@ -620,7 +731,23 @@ function pool(
         for (let gi = 0; gi < NGROUP; gi++) {
           ratio[gi] = G[gi] > 0 ? left[gi] / G[gi] : 0;
           const v = base * sh[i] * left[gi];
-          if (!(v > 0) || lean) continue;
+          if (!(v > 0)) continue;
+          if (B) {
+            // Religion and party among those left in this group: the joint,
+            // restricted to your picks.
+            const bl = beliefsLeft(a, GROUPS[gi].edu, GROUPS[gi].race);
+            if (bl) {
+              for (let r = 0; r < NREL; r++) {
+                out.typed.rel[(a - lo) * NREL + r] += v * bl[0][r];
+                comp.religion[r] += v * bl[0][r];
+              }
+              for (let pt = 0; pt < NPOL; pt++) {
+                out.typed.pol[(a - lo) * NPOL + pt] += v * bl[1][pt];
+                comp.politics[pt] += v * bl[1][pt];
+              }
+            }
+          }
+          if (lean) continue;
           // Health shares among those left (zero for anything filtered out);
           // under a BMI cap, the share still over 25 (or 30) among those kept.
           const gr = GROUPS[gi];
@@ -636,23 +763,25 @@ function pool(
           if (wkSum > 0)
             for (let r = 0; r < NWANT; r++) if (!wantPicked || wantPicked.includes(r)) comp.wantKids[r] += (v * wm[r]) / wkSum;
         }
-        // Religion among those left: the mix, restricted to your picks.
-        const rm = relMix(a) ?? new Array(NREL).fill(1 / NREL);
-        const kept = relPicked ? rm.map((v, r) => (relPicked.includes(r) ? v : 0)) : rm;
-        const keptSum = kept.reduce((x, y) => x + y, 0) || 1;
-        for (let r = 0; r < NREL; r++) {
-          const v = inPool * (kept[r] / keptSum);
-          out.typed.rel[(a - lo) * NREL + r] += v;
-          comp.religion[r] += v;
-        }
-        // Political leaning among those left.
-        const pm = polMix(a) ?? new Array(NPOL).fill(1 / NPOL);
-        const pk = polPicked ? pm.map((v, r) => (polPicked.includes(r) ? v : 0)) : pm;
-        const pkSum = pk.reduce((x, y) => x + y, 0) || 1;
-        for (let r = 0; r < NPOL; r++) {
-          const v = inPool * (pk[r] / pkSum);
-          out.typed.pol[(a - lo) * NPOL + r] += v;
-          comp.politics[r] += v;
+        // Without the joint table: religion and party by age only.
+        if (!B) {
+          const rm = relMix(a) ?? new Array(NREL).fill(1 / NREL);
+          const kept = relPicked ? rm.map((v, r) => (relPicked.includes(r) ? v : 0)) : rm;
+          const keptSum = kept.reduce((x, y) => x + y, 0) || 1;
+          for (let r = 0; r < NREL; r++) {
+            const v = inPool * (kept[r] / keptSum);
+            out.typed.rel[(a - lo) * NREL + r] += v;
+            comp.religion[r] += v;
+          }
+          // Political leaning among those left.
+          const pm = polMix(a) ?? new Array(NPOL).fill(1 / NPOL);
+          const pk = polPicked ? pm.map((v, r) => (polPicked.includes(r) ? v : 0)) : pm;
+          const pkSum = pk.reduce((x, y) => x + y, 0) || 1;
+          for (let r = 0; r < NPOL; r++) {
+            const v = inPool * (pk[r] / pkSum);
+            out.typed.pol[(a - lo) * NPOL + r] += v;
+            comp.politics[r] += v;
+          }
         }
         for (let c = 0; c < NCELL; c++) {
           if (!(p[c] > 0) || !iw[c]) continue;
@@ -751,8 +880,8 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
       "Removes current cigarette smokers. Rates for unpartnered adults by sex, age, degree (bachelor's or not) and race/ethnicity from a model of NHANES 2017-2023, shifted by how the place's (or its state's) 2024 BRFSS rate differs from the US, beyond what its race, education and age make-up already explains. Follows the degree and race mix of who's left; assumed unrelated to income and the other filters.");
   if (q.filters.religions.length && g.religion) {
     const names = [...q.filters.religions].sort().map((r) => RELIGIONS[r]);
-    push("religion", names.join(", "), "other religions (or none)", t.religion, "survey", [SOURCES.gss, SOURCES.religionLocal],
-      "National religious identification of unmarried adults by sex and age (General Social Survey 2016-2024), shifted by how this state or metro differs from the US. Applied as independent of every other filter.");
+    push("religion", names.join(", "), "other religions (or none)", t.religion, "survey", [SOURCES.ces, SOURCES.religionLocal],
+      "Religion of unmarried adults by sex, age, education and race/ethnicity, estimated jointly with party from the 2024 Cooperative Election Study and calibrated to Pew's national shares, then shifted by how this place's religious mix (Pew metro or state, plus CES respondents living there) differs from the US beyond its make-up. Follows the education and race mix of who's left; assumed unrelated to kids, income and health.");
   }
   if (q.filters.politics.length && g.politics) {
     // Shown as dealbreakers: "No Republicans" rather than "Democratic or
@@ -763,8 +892,8 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
       out.length === 1
         ? [`No ${PARTY_PLURAL[out[0]]}`, PARTY_PLURAL[out[0]]]
         : [`${kept.map((r) => PARTY_PLURAL[r]).join(" and ")} only`, out.map((r) => PARTY_PLURAL[r]).join(" and ")];
-    push("politics", label, gone, t.politics, "survey", [SOURCES.gss, SOURCES.election],
-      "Party identification of unmarried adults by sex and age (General Social Survey 2016-2024, leaners counted with their party), with Democratic vs. Republican odds shifted by how this metro voted in 2024 relative to the country. Applied as independent of every other filter.");
+    push("politics", label, gone, t.politics, "survey", [SOURCES.ces, SOURCES.election],
+      "Party identification of unmarried adults (leaners counted with their party) by sex, age, education, race/ethnicity and religion, from the 2024 Cooperative Election Study, with Democratic vs. Republican odds shifted by how this place voted in 2024 beyond what its make-up explains. Because it's joint with religion, a religion filter changes who's left politically. Assumed unrelated to kids, income and health.");
   }
   if (q.filters.wantKids.length && g.kids) {
     const out = WANT_KIDS.map((_, r) => r).filter((r) => !q.filters.wantKids.includes(r));
