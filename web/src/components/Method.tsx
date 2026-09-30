@@ -100,8 +100,9 @@ export default function Method({ dataYear }: { dataYear: string }) {
         <p>
           <strong>Kids someday.</strong> Unpartnered adults answering &ldquo;Do you, yourself, want to have a(nother)
           baby at some time in the future?&rdquo; in the <Src s={SOURCES.nsfgWant} />: yes, no or don&apos;t know, by
-          sex, age, education and whether they already have kids. Because it varies with education and kids, it
-          follows the mix of who&apos;s left after the Census filters instead of assuming independence. The survey
+          sex, age, education, whether they already have kids and race/ethnicity (the public survey lumps Asian
+          singles into &ldquo;other&rdquo;). It follows that mix among who&apos;s left instead of assuming
+          independence; it doesn&apos;t depend on religion or income. The survey
           covers ages 18–49 here; older ages reuse the 45–49 rates, which likely overstates how many older women
           want kids. The unsure (about 4%) are never ruled out. It&apos;s national, and intentions change.
         </p>

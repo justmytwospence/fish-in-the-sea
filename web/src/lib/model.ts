@@ -180,7 +180,7 @@ export interface PoliticsData {
 // Shape of kids.json (see pipeline/kids.py).
 export interface KidsData {
   bands: [number, number][];
-  rates: Record<"1" | "2", number[][][][]>; // [band][has kids][edu][WANT_KIDS]
+  rates: Record<"1" | "2", number[][][][][]>; // [band][has kids][edu][race][WANT_KIDS]
 }
 
 // Shape of beliefs.json (see pipeline/beliefs.py): religion x party.
@@ -477,10 +477,12 @@ function pool(
   // The NSFG stops at 49; older ages use the 45-49 rates.
   const K = g.kids;
   const wantPicked = withFilters && f.wantKids.length && K ? f.wantKids : null;
-  const wantMix = (a: number, edu: number, kids: number) => {
+  const wantMix = (a: number, edu: number, kids: number, race: number) => {
     if (!K) return null;
     const i = K.bands.findIndex(([lo, hi]) => a >= lo && a <= hi);
-    return K.rates[sx][i < 0 ? (a < K.bands[0][0] ? 0 : K.bands.length - 1) : i][kids][edu];
+    const cell = K.rates[sx][i < 0 ? (a < K.bands[0][0] ? 0 : K.bands.length - 1) : i][kids][edu];
+    // Older kids.json had no race level.
+    return (Array.isArray(cell[0]) ? (cell as unknown as number[][])[race] : cell) as number[];
   };
   const fBmi = (a: number, ba: number, race: number) =>
     withFilters && f.bmiMax ? 1 - (bmiRate(g, sex, a, s.id, f.bmiMax, ba, race) ?? 0) : 1;
@@ -654,11 +656,11 @@ function pool(
         wantPicked
           ? {
               group: (a, gr) => {
-                const m = wantMix(a, gr.edu, gr.kids);
+                const m = wantMix(a, gr.edu, gr.kids, gr.race);
                 return m ? wantPicked.reduce((t, r) => t + m[r], 0) : 1;
               },
-              key: (gr) => gr.edu * 2 + gr.kids,
-              keys: 6,
+              key: (gr) => (gr.edu * 2 + gr.kids) * NRACE + gr.race,
+              keys: 6 * NRACE,
             }
           : off,
         withFilters && f.bmiMax ? { group: (a, gr) => fBmi(a, gr.edu >= 1 ? 1 : 0, gr.race), ...byDegreeRace } : off,
@@ -761,7 +763,7 @@ function pool(
           if (comp.smoke !== null) comp.smoke += v * sm;
           if (comp.obese !== null) comp.obese += (v * (cap ? Math.max(0, obRaw - capAbove) : obRaw)) / (cap ? keptB : 1);
           if (comp.over !== null) comp.over += (v * (cap ? Math.max(0, ovRaw - capAbove) : ovRaw)) / (cap ? keptB : 1);
-          const wm = wantMix(a, GROUPS[gi].edu, GROUPS[gi].kids);
+          const wm = wantMix(a, GROUPS[gi].edu, GROUPS[gi].kids, GROUPS[gi].race);
           if (!wm) continue;
           let wkSum = 0;
           for (let r = 0; r < NWANT; r++) if (!wantPicked || wantPicked.includes(r)) wkSum += wm[r];
@@ -905,7 +907,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
     const label = out.length === 1 ? `Not "${WANT_KIDS[out[0]].toLowerCase()}"` : q.filters.wantKids.map((r) => WANT_KIDS[r]).join(" or ");
     push("wantKids", out.length === 1 && out[0] === 2 ? "Open to kids" : out.length === 1 && out[0] === 0 ? "Not set on kids" : label,
       out.map((r) => WANT_KIDS[r].toLowerCase()).join(" and "), t.wantKids, "survey", [SOURCES.nsfgWant],
-      "Whether unpartnered adults want a(nother) baby someday (\"Do you, yourself, want to have a(nother) baby at some time in the future?\"), by sex, age, education and whether they already have kids, from the National Survey of Family Growth 2022-2023. Follows the education and kids mix of who's left. The survey stops at 49, so older ages use the 45-49 rates. Intentions change, in both directions.");
+      "Whether unpartnered adults want a(nother) baby someday (\"Do you, yourself, want to have a(nother) baby at some time in the future?\"), by sex, age, education, whether they already have kids and race/ethnicity (Asian singles share the survey's ‘other’ group), from the National Survey of Family Growth 2022-2023. Follows the education, kids and race mix of who's left; assumed unrelated to religion and income. The survey stops at 49, so older ages use the 45-49 rates. Intentions change, in both directions.");
   }
   if (q.filters.bmiMax && g.health)
     push("bmi", `BMI under ${q.filters.bmiMax}`, `BMI ${q.filters.bmiMax} or higher`,

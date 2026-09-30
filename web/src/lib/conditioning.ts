@@ -70,9 +70,9 @@ export const CONDITIONING: Conditioning[] = [
   {
     step: "Kids someday",
     source: "NSFG",
-    on: "sex, age, education, kids already",
-    not: "race, religion, income",
-    local: "national (varies by place only through education and kids)",
+    on: "sex, age, education, kids already, race/ethnicity",
+    not: "religion, income",
+    local: "national (varies by place only through education, kids and race)",
   },
   {
     step: "BMI",
