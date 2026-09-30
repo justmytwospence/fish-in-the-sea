@@ -62,6 +62,9 @@ export interface Global {
   // ($k), by sex and age bin (see build.py).
   incomeCuts?: number[];
   incomeAbove?: Record<"1" | "2", number[][]>;
+  // Race mix by education x income relative to the whole group, national:
+  // [sex][age bin][marital nm/sep/wid/div][edu*4 + income][race].
+  raceTilt?: Record<"1" | "2", number[][][][]>;
   // Merged in from context.json.
   health?: HealthNational;
   ctx?: Record<string, MarketCtx>;
@@ -180,6 +183,17 @@ export const NCELL = 97;
 const INST = 96;
 const UNMARRIED: UMarg[] = ["nm", "wid", "div"];
 const Z90 = 1.645;
+
+// Survey steps run over groups of (education, kids at home, race/ethnicity),
+// so any of them can depend on those as well as on sex and age.
+const NGROUP = 3 * 2 * NRACE;
+const groupOf = (edu: number, kids: number, race: number) => (edu * 2 + kids) * NRACE + race;
+const GROUPS = Array.from({ length: NGROUP }, (_, gi) => ({
+  edu: Math.floor(gi / (2 * NRACE)),
+  kids: Math.floor(gi / NRACE) % 2,
+  race: gi % NRACE,
+}));
+const MARG_INDEX: Record<string, number> = { nm: 0, sep: 1, wid: 2, div: 3 };
 
 export const cellOf = (c: number) => ({
   cohab: Math.floor(c / 48),
@@ -447,70 +461,119 @@ function pool(
       const iw = incomeWeights(b);
       const pIncome = p.reduce((t, v, c) => t + v * iw[c], 0);
       add(out.income, C, varC, pIncome, n, 1);
-      // Race/ethnicity: this group's mix, restricted to the races you picked.
+      // Race/ethnicity: this group's local mix, tilted for each education x
+      // income cell by the national association, then restricted to the
+      // races you picked.
       const rs = s.race?.[sx]?.[mg]?.[b] ?? new Array(NRACE).fill(1 / NRACE);
+      const tilt = g.raceTilt?.[sx]?.[b]?.[MARG_INDEX[mg]];
+      const mixes = Array.from({ length: 12 }, (_, ei) => {
+        if (!tilt) return rs;
+        const v = rs.map((x, r) => x * (tilt[ei]?.[r] ?? 1));
+        const t = v.reduce((x, y) => x + y, 0);
+        return t > 0 ? v.map((x) => x / t) : rs;
+      });
       const picked = withFilters && f.races.length ? f.races : null;
-      const rsKept = rs.map((v, r) => (!picked || picked.includes(r) ? v : 0));
-      const raceKept = picked ? rsKept.reduce((a, v) => a + v, 0) : 1;
-      const pFinal = pIncome * raceKept;
+      const kr = Array.from({ length: NRACE }, (_, r) => (!picked || picked.includes(r) ? 1 : 0));
+      // Share of this group left after the Census steps, by (education,
+      // kids, race).
+      const G = new Float64Array(NGROUP);
+      for (let c = 0; c < NCELL; c++) {
+        if (!(p[c] > 0) || !iw[c]) continue;
+        const { edu, kids, inc } = cellOf(c);
+        const mix = mixes[edu * 4 + inc];
+        for (let r = 0; r < NRACE; r++) if (kr[r]) G[groupOf(edu, kids, r)] += p[c] * iw[c] * mix[r];
+      }
+      const pFinal = G.reduce((x, y) => x + y, 0);
       add(out.race, C, varC, pFinal, n, 1);
       records += n * pFinal * S;
 
-      // Survey-based factors vary by single year of age: average them over
-      // the ages in this bin, weighted by the age shares.
-      const avg = (f: (a: number) => number) => ages.reduce((t, a, i) => t + sh[i] * f(a), 0) / S;
-      const fh = (a: number) => (hf ? heightRangeShare(sex, a, hf.lo, hf.hi) : 1);
-      const fs = (a: number) => fh(a) * fSmoke(a);
-      const fg = (a: number) => fs(a) * fRel(a);
-      const fp = (a: number) => fg(a) * fPol(a);
-      // Share of this group's remaining cells wanting what you picked.
-      const wantKept = (a: number) => {
-        if (!wantPicked) return 1;
-        let num = 0;
-        let den = 0;
-        for (let c = 0; c < NCELL; c++) {
-          if (!masks.income[c] || p[c] <= 0) continue;
-          const { edu, kids } = cellOf(c);
-          const m = wantMix(a, edu, kids);
-          den += p[c] * iw[c];
-          num += p[c] * iw[c] * (m ? wantPicked.reduce((t, r) => t + m[r], 0) : 1);
-        }
-        return den > 0 ? num / den : 1;
+      // Survey steps, in sieve order: the share kept at a given age, either
+      // the same for everyone ("age") or per group ("group"). For one age,
+      // `chain` gives the share of pFinal left after each step, and what's
+      // left of each group after all of them.
+      type SurveyStep = { age: (a: number) => number } | { group: (a: number, gr: (typeof GROUPS)[number]) => number };
+      const surveySteps: SurveyStep[] = [
+        { age: (a) => (hf ? heightRangeShare(sex, a, hf.lo, hf.hi) : 1) },
+        { age: (a) => fSmoke(a) },
+        { age: (a) => fRel(a) },
+        { age: (a) => fPol(a) },
+        {
+          group: (a, gr) => {
+            if (!wantPicked) return 1;
+            const m = wantMix(a, gr.edu, gr.kids);
+            return m ? wantPicked.reduce((t, r) => t + m[r], 0) : 1;
+          },
+        },
+        { age: (a) => fBmi(a) },
+        { age: (a) => (q.model.orientation ? attraction(sex, towards, a) : 1) },
+        { age: (a) => (q.model.relationship ? 1 - inRelationship(sex, a) : 1) },
+        { age: (a) => (q.model.looking ? looking(sex, a) : 1) },
+      ];
+      const chain = (a: number) => {
+        const left = Float64Array.from(G);
+        let total = pFinal;
+        const byStep = surveySteps.map((step) => {
+          if ("age" in step) {
+            const k = step.age(a);
+            if (k !== 1) for (let gi = 0; gi < NGROUP; gi++) left[gi] *= k;
+            total *= k;
+            return total;
+          }
+          total = 0;
+          for (let gi = 0; gi < NGROUP; gi++) {
+            if (left[gi] <= 0) continue;
+            left[gi] *= step.group(a, GROUPS[gi]);
+            total += left[gi];
+          }
+          return total;
+        });
+        return { byStep, left };
       };
-      const fk = (a: number) => fp(a) * wantKept(a);
-      const fb = (a: number) => fk(a) * fBmi(a);
-      const fo = (a: number) => fb(a) * (q.model.orientation ? attraction(sex, towards, a) : 1);
-      const fr = (a: number) => fo(a) * (q.model.relationship ? 1 - inRelationship(sex, a) : 1);
-      const fl = (a: number) => fr(a) * (q.model.looking ? looking(sex, a) : 1);
+      const chains = ages.map(chain);
+      const avgStep = (k: number) =>
+        pFinal > 0 ? chains.reduce((t, ch, i) => t + sh[i] * ch.byStep[k], 0) / S / pFinal : 0;
       const spark = q.model.spark > 0 ? q.model.spark : 1;
-      add(out.height, C, varC, pFinal, n, avg(fh));
-      add(out.smoke, C, varC, pFinal, n, avg(fs));
-      add(out.bmi, C, varC, pFinal, n, avg(fb));
-      add(out.religion, C, varC, pFinal, n, avg(fg));
-      add(out.politics, C, varC, pFinal, n, avg(fp));
-      add(out.wantKids, C, varC, pFinal, n, avg(fk));
-      add(out.orientation, C, varC, pFinal, n, avg(fo));
-      add(out.relationship, C, varC, pFinal, n, avg(fr));
-      add(out.looking, C, varC, pFinal, n, avg(fl));
-      add(out.spark, C, varC, pFinal, n, avg(fl) * spark);
+      const accs = [out.height, out.smoke, out.religion, out.politics, out.wantKids, out.bmi, out.orientation, out.relationship, out.looking];
+      accs.forEach((ac, k) => add(ac, C, varC, pFinal, n, avgStep(k)));
+      add(out.spark, C, varC, pFinal, n, avgStep(accs.length - 1) * spark);
 
       const prev = mg === "nm" ? 0 : 1;
       const base = s.counts[sx][mg][b];
       ages.forEach((a, i) => {
-        const w = base * sh[i] * fl(a) * raceKept;
+        const { left } = chains[i];
         const row = (a - lo) * NTYPE;
         const rrow = (a - lo) * NRACE;
-        const inPool = base * sh[i] * fl(a) * pIncome;
-        for (let r = 0; r < NRACE; r++) {
-          out.typed.race[rrow + r] += inPool * rsKept[r];
-          comp.race[r] += inPool * rsKept[r];
+        // Everyone left at this age.
+        let inPool = 0;
+        for (let gi = 0; gi < NGROUP; gi++) {
+          const v = base * sh[i] * left[gi];
+          if (!(v > 0)) continue;
+          inPool += v;
+          const { race } = GROUPS[gi];
+          out.typed.race[rrow + race] += v;
+          comp.race[race] += v;
+        }
+        // What's left of each group relative to its size after the Census
+        // steps, to carry down to the cells inside it; and kids someday by
+        // group (it depends on education and kids).
+        const ratio = new Float64Array(NGROUP);
+        for (let gi = 0; gi < NGROUP; gi++) {
+          ratio[gi] = G[gi] > 0 ? left[gi] / G[gi] : 0;
+          const v = base * sh[i] * left[gi];
+          if (!(v > 0)) continue;
+          const wm = wantMix(a, GROUPS[gi].edu, GROUPS[gi].kids);
+          if (!wm) continue;
+          let wkSum = 0;
+          for (let r = 0; r < NWANT; r++) if (!wantPicked || wantPicked.includes(r)) wkSum += wm[r];
+          if (wkSum > 0)
+            for (let r = 0; r < NWANT; r++) if (!wantPicked || wantPicked.includes(r)) comp.wantKids[r] += (v * wm[r]) / wkSum;
         }
         // Religion among those left: the mix, restricted to your picks.
         const rm = relMix(a) ?? new Array(NREL).fill(1 / NREL);
         const kept = relPicked ? rm.map((v, r) => (relPicked.includes(r) ? v : 0)) : rm;
         const keptSum = kept.reduce((x, y) => x + y, 0) || 1;
         for (let r = 0; r < NREL; r++) {
-          const v = inPool * raceKept * (kept[r] / keptSum);
+          const v = inPool * (kept[r] / keptSum);
           out.typed.rel[(a - lo) * NREL + r] += v;
           comp.religion[r] += v;
         }
@@ -519,7 +582,7 @@ function pool(
         const pk = polPicked ? pm.map((v, r) => (polPicked.includes(r) ? v : 0)) : pm;
         const pkSum = pk.reduce((x, y) => x + y, 0) || 1;
         for (let r = 0; r < NPOL; r++) {
-          const v = inPool * raceKept * (pk[r] / pkSum);
+          const v = inPool * (pk[r] / pkSum);
           out.typed.pol[(a - lo) * NPOL + r] += v;
           comp.politics[r] += v;
         }
@@ -534,15 +597,14 @@ function pool(
         const ob = cap ? Math.max(0, obRaw - capAbove) / keptB : obRaw;
         const ov = cap ? Math.max(0, ovRaw - capAbove) / keptB : ovRaw;
         for (let c = 0; c < NCELL; c++) {
-          if (!masks.income[c] || p[c] <= 0) continue;
+          if (!(p[c] > 0) || !iw[c]) continue;
           const { edu, kids, inc, par } = cellOf(c);
-          const v = w * p[c] * iw[c];
-          const wm = wantMix(a, edu, kids);
-          if (wm) {
-            const wk = wm.map((x, r) => (!wantPicked || wantPicked.includes(r) ? x : 0));
-            const wkSum = wk.reduce((x, y) => x + y, 0) || 1;
-            for (let r = 0; r < NWANT; r++) comp.wantKids[r] += (v * wk[r]) / wkSum;
-          }
+          const mix = mixes[edu * 4 + inc];
+          const g0 = groupOf(edu, kids, 0);
+          let share = 0;
+          for (let r = 0; r < NRACE; r++) if (kr[r]) share += mix[r] * ratio[g0 + r];
+          const v = base * sh[i] * p[c] * iw[c] * share;
+          if (!(v > 0)) continue;
           out.typed.m[row + typeIndex(edu, inc, kids, prev)] += v;
           comp.ages[a - lo] += v;
           comp.edu[edu] += v;
@@ -611,7 +673,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   if (q.filters.races.length) {
     const names = [...q.filters.races].sort().map((r) => RACES[r]);
     push("race", `${names.join(", ")}`, "other races and ethnicities", t.race, "microdata", [SOURCES.pums],
-      "Race and ethnicity mix of available singles of this sex, age and marital status in this metro (Hispanic of any race; other groups non-Hispanic). Applied as independent of the education, kids, living-situation and income filters, which it isn't quite.");
+      "Race and ethnicity mix of available singles of this sex, age and marital status in this metro (Hispanic of any race; other groups non-Hispanic). Adjusted for each education and income group by how race varies with them nationally among singles of the same sex, age and marital status, so it combines properly with the degree and income filters. Assumed unrelated to kids at home and living situation beyond that.");
   }
   if (q.filters.incomeMin > 0)
     push("income", `Earning $${q.filters.incomeMin}k+`, "earning less",

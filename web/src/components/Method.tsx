@@ -1,4 +1,5 @@
 import { SOURCES } from "@/lib/assumptions";
+import { CONDITIONING } from "@/lib/conditioning";
 
 function Src({ s }: { s: { label: string; url: string } }) {
   return (
@@ -42,10 +43,13 @@ export default function Method({ dataYear }: { dataYear: string }) {
           $120k+); an income floor inside a bracket keeps the national share of that bracket above it, by sex and age.
         </p>
         <p>
-          <strong>The survey steps</strong> are national, by age and sex, and applied as multipliers, so treat
-          them as educated guesses (they&apos;re marked <em>est.</em> and can be switched off). When you stack
-          several Census filters in a small metro, fewer than about 30 survey records may stand behind the result;
-          those steps get a <em>thin data</em> tag.
+          <strong>The survey steps</strong> come from national surveys and are applied as shares of whoever is
+          left, so treat them as educated guesses (they&apos;re marked <em>est.</em> and can be switched off). Each
+          is worked out separately for every combination of education, kids at home and race/ethnicity among
+          who&apos;s left, so a step can depend on those where the survey supports it. The table below says exactly
+          what each one depends on and what it assumes away. When you stack several Census filters in a small
+          metro, fewer than about 30 survey records may stand behind the result; those steps get a{" "}
+          <em>thin data</em> tag.
         </p>
         <ul className="list-disc space-y-1 pl-5">
           <li>
@@ -69,8 +73,11 @@ export default function Method({ dataYear }: { dataYear: string }) {
         <p>
           <strong>Race and ethnicity.</strong> The optional filter uses each metro&apos;s race and ethnicity mix of
           available singles by sex, age and marital status from the <Src s={SOURCES.pums} /> (Hispanic of any race;
-          the other groups non-Hispanic), applied independently of the education, kids, living-situation and income
-          filters. In the competition model, race pairing is a revealed preference like education: how often recent
+          the other groups non-Hispanic). That mix is then adjusted for each education and income group by how race
+          varies with education and income nationally among singles of the same sex, age and marital status (for
+          example, far more Asian singles hold graduate degrees), so combining a race filter with a degree or
+          income filter no longer treats them as unrelated. The local mix is the metro&apos;s own; only the
+          education and income pattern is national. In the competition model, race pairing is a revealed preference like education: how often recent
           couples paired across groups relative to who was single and available. Those patterns reflect
           segregation, social networks and history as much as anyone&apos;s preferences.
         </p>
@@ -107,6 +114,38 @@ export default function Method({ dataYear }: { dataYear: string }) {
           with education, for example). The 2024 vote in the context card sums county results from{" "}
           <Src s={SOURCES.election} />.
         </p>
+        <div>
+          <p>
+            <strong>What each estimate depends on.</strong> Everything not listed as a dependency is assumed
+            unrelated, given the ones that are.
+          </p>
+          <div className="-mx-1 mt-3 overflow-x-auto">
+            <table className="w-full min-w-[40rem] border-separate border-spacing-x-1 text-[13px] leading-snug">
+              <thead>
+                <tr className="text-left text-xs text-muted">
+                  <th scope="col" className="border-b border-rule py-2 font-medium">Step</th>
+                  <th scope="col" className="border-b border-rule py-2 font-medium">Source</th>
+                  <th scope="col" className="border-b border-rule py-2 font-medium">Depends on</th>
+                  <th scope="col" className="border-b border-rule py-2 font-medium">Assumed independent of</th>
+                  <th scope="col" className="border-b border-rule py-2 font-medium">By place</th>
+                </tr>
+              </thead>
+              <tbody>
+                {CONDITIONING.map((c) => (
+                  <tr key={c.step} className="align-top">
+                    <th scope="row" className="border-b border-rule/60 py-2 pr-2 text-left font-medium text-ink">
+                      {c.step}
+                    </th>
+                    <td className="border-b border-rule/60 py-2 pr-2">{c.source}</td>
+                    <td className="border-b border-rule/60 py-2 pr-2 text-ink">{c.on}</td>
+                    <td className="border-b border-rule/60 py-2 pr-2">{c.not}</td>
+                    <td className="border-b border-rule/60 py-2">{c.local}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
         <p>
           <strong>Competition</strong> is a revealed-preference choice model fitted to couples formed in the last one to
           three years (age, education, income and marriage history), plus published estimates for kids and height. It

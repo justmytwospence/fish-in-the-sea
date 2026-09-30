@@ -511,6 +511,32 @@ print(f"  mountain: {sum('mountain' in e['tags'] for e in index)}")
 (OUT / "markets.json").write_text(json.dumps(
     dict(year=f"ACS 2020-{YEAR} 5-year, scaled to {PEP_VINTAGE}", markets=index, places=plist),
     separators=(",", ":")))
+# Race by education and income: national race mix of available singles in
+# each education x income group, relative to the mix for the whole sex x age
+# bin x marital group ("tilt"), shrunk toward no tilt. At runtime each
+# market's own race mix is tilted by these, so race and the Census cells are
+# no longer independent (the association is national; the mix is local).
+EI = "(edu*4 + inc)"
+nat_rei = dist(con.execute(f"""
+  select sex, bin, marg, {EI} ei, race cell, sum(w) w, sum(w*w) w2 from p
+  where {avail} group by all""").df(), ["sex", "bin", "marg", "ei"], NRACE)
+race_tilt = {}
+for sex in (1, 2):
+    by_bin = []
+    for i in range(len(BINS)):
+        by_m = []
+        for mi in range(4):
+            base, _ = nat_r.get((sex, i, mi), (np.full(NRACE, 1 / NRACE), 0))
+            rows_ = []
+            for ei in range(12):
+                cell = nat_rei.get((sex, i, mi, ei))
+                pr, _ = shrink(cell, (base, 0))
+                t = np.where(base > 0, pr / np.maximum(base, 1e-9), 1.0)
+                rows_.append([round(float(x), 3) for x in t])
+            by_m.append(rows_)
+        by_bin.append(by_m)
+    race_tilt[str(sex)] = by_bin
+
 # Income slider: the attribute cells only know four brackets (floors $0,
 # $25k, $60k, $120k), so a floor inside a bracket keeps the share of that
 # bracket at or above it, from national microdata for available singles by
@@ -537,7 +563,7 @@ for sex in (1, 2):
 
 (OUT / "global.json").write_text(json.dumps(
     dict(bins=BINS, marg=MARG, ageMin=AGE_MIN, ageMax=AGE_MAX,
-         ageShares=age_shares, partnerCdf=cdfs, incomeCuts=INC_CUTS, incomeAbove=income_above),
+         ageShares=age_shares, partnerCdf=cdfs, incomeCuts=INC_CUTS, incomeAbove=income_above, raceTilt=race_tilt),
     separators=(",", ":")))
 (ROOT / "market_counties.json").write_text(json.dumps({m["id"]: m["counties"] for m in markets}))
 print(f"  wrote {len(index)} markets, {len(plist)} places")
