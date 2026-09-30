@@ -16,4 +16,4 @@ export interface RankResponse {
 
 // Every market takes a few milliseconds, so the client asks for the country
 // in PARTS parallel slices (same order every time) and merges them.
-export const PARTS = 16;
+export const PARTS = 8;

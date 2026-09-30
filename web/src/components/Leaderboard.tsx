@@ -213,7 +213,7 @@ export default function Leaderboard({ qs, query, onPick }: { qs: string; query: 
     const t = setTimeout(() => {
       Promise.all(
         Array.from({ length: PARTS }, (_, part) =>
-          fetch(`/api/rank?v=10&part=${part}&${qs}`, { signal: ctrl.signal }).then((r) => r.json() as Promise<RankResponse>),
+          fetch(`/api/rank?v=11&part=${part}&${qs}`, { signal: ctrl.signal }).then((r) => r.json() as Promise<RankResponse>),
         ),
       )
         .then((parts) => setData({ qs, all: parts.flatMap((p) => p.all) }))
