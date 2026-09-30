@@ -540,25 +540,29 @@ for sex in (1, 2):
 # Income slider: the attribute cells only know four brackets (floors $0,
 # $25k, $60k, $120k), so a floor inside a bracket keeps the share of that
 # bracket at or above it, from national microdata for available singles by
-# sex and age bin. incomeAbove[sex][bin][k] is for a floor of incomeCuts[k].
+# sex, age bin and education. incomeAbove[sex][bin][edu][k] is for a floor of
+# incomeCuts[k].
 INC_EDGES = [0, 25, 60, 120]
 INC_CUTS = list(range(0, 255, 5))
 inc = con.execute(f"""
-  select sex, bin, coalesce(pincp, 0) * adjinc / 1e9 k, w from p where {avail} and bin >= 0
+  select sex, bin, edu, coalesce(pincp, 0) * adjinc / 1e9 k, w from p where {avail} and bin >= 0
 """).df()
 income_above = {}
 for sex in (1, 2):
     rows = []
     for b in range(len(BINS)):
-        g = inc[(inc.sex == sex) & (inc.bin == b)]
-        row = []
-        for t in INC_CUTS:
-            br = max(i for i, e in enumerate(INC_EDGES) if t >= e)
-            hi = INC_EDGES[br + 1] if br + 1 < len(INC_EDGES) else math.inf
-            inb = g[(g.k >= INC_EDGES[br]) & (g.k < hi)]
-            tot = inb.w.sum()
-            row.append(round(float(inb.w[inb.k >= t].sum() / tot), 4) if tot > 0 else 1.0)
-        rows.append(row)
+        by_edu = []
+        for e in range(3):
+            g = inc[(inc.sex == sex) & (inc.bin == b) & (inc.edu == e)]
+            row = []
+            for t in INC_CUTS:
+                br = max(i for i, x in enumerate(INC_EDGES) if t >= x)
+                hi = INC_EDGES[br + 1] if br + 1 < len(INC_EDGES) else math.inf
+                inb = g[(g.k >= INC_EDGES[br]) & (g.k < hi)]
+                tot = inb.w.sum()
+                row.append(round(float(inb.w[inb.k >= t].sum() / tot), 4) if tot > 0 else 1.0)
+            by_edu.append(row)
+        rows.append(by_edu)
     income_above[str(sex)] = rows
 
 (OUT / "global.json").write_text(json.dumps(

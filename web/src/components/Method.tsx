@@ -40,7 +40,8 @@ export default function Method({ dataYear }: { dataYear: string }) {
           their Census division. Measuring these jointly, instead of multiplying separate percentages, keeps real
           correlations: unmarried 35-year-olds are more likely to have a degree and less likely to have kids than
           35-year-olds overall. The microdata carry income in four brackets (under $25k, $25k–60k, $60k–120k,
-          $120k+); an income floor inside a bracket keeps the national share of that bracket above it, by sex and age.
+          $120k+); an income floor inside a bracket keeps the national share of that bracket above it, by sex, age and
+          education.
         </p>
         <p>
           <strong>The survey steps</strong> come from national surveys and are applied as shares of whoever is

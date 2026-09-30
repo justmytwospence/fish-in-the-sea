@@ -66,9 +66,9 @@ export interface Global {
   ageMax: number;
   ageShares: Record<string, Record<"1" | "2", Record<Marg, number[][]>>>;
   // Income floors inside a bracket: share of the bracket at or above each cut
-  // ($k), by sex and age bin (see build.py).
+  // ($k), by sex, age bin and education (see build.py).
   incomeCuts?: number[];
-  incomeAbove?: Record<"1" | "2", number[][]>;
+  incomeAbove?: Record<"1" | "2", number[][][]>;
   // Race mix by education x income relative to the whole group, national:
   // [sex][age bin][marital nm/sep/wid/div][edu*4 + income][race].
   raceTilt?: Record<"1" | "2", number[][][][]>;
@@ -485,13 +485,18 @@ function pool(
   const fBmi = (a: number, ba: number, race: number) =>
     withFilters && f.bmiMax ? 1 - (bmiRate(g, sex, a, s.id, f.bmiMax, ba, race) ?? 0) : 1;
   // An income floor inside a bracket keeps that bracket's share at or above
-  // it (national, by sex and age bin); other brackets are all in or all out.
+  // it (national, by sex, age bin and education); other brackets are all in
+  // or all out.
   const incBr = incomeBracket(f.incomeMin);
   const incomeWeights = (b: number) => {
     const cut = g.incomeCuts?.indexOf(f.incomeMin) ?? -1;
-    const frac =
-      withFilters && f.incomeMin > INC_FLOORS[incBr] && cut >= 0 ? (g.incomeAbove?.[sx]?.[b]?.[cut] ?? 1) : 1;
-    return masks.income.map((ok, c) => (ok ? (withFilters && cellOf(c).inc === incBr ? frac : 1) : 0));
+    const partial = withFilters && f.incomeMin > INC_FLOORS[incBr] && cut >= 0;
+    const frac = (edu: number) => (partial ? (g.incomeAbove?.[sx]?.[b]?.[edu]?.[cut] ?? 1) : 1);
+    return masks.income.map((ok, c) => {
+      if (!ok) return 0;
+      const { inc, edu } = cellOf(c);
+      return withFilters && inc === incBr ? frac(edu) : 1;
+    });
   };
   const comp: Composition = {
     ageLo: lo,
@@ -862,7 +867,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   if (q.filters.incomeMin > 0)
     push("income", `Earning $${q.filters.incomeMin}k+`, "earning less",
       t.income, "microdata", [SOURCES.pums],
-      "Personal income (all sources, 2024 dollars), not household income. Measured jointly with education, kids and living situation, so the correlations hold. The microdata here come in four brackets ($25k, $60k, $120k); a floor inside one keeps the national share of that bracket at or above it, by sex and age. Not adjusted for local cost of living.");
+      "Personal income (all sources, 2024 dollars), not household income. Measured jointly with education, kids and living situation, so the correlations hold. The microdata here come in four brackets ($25k, $60k, $120k); a floor inside one keeps the national share of that bracket at or above it, by sex, age and education. Not adjusted for local cost of living.");
   const hf = heightFilter(q);
   if (hf) {
     const ft = (h: number) => `${Math.floor(h / 12)}′${h % 12}″`;

@@ -28,9 +28,9 @@ export const CONDITIONING: Conditioning[] = [
   {
     step: "Income floor inside a bracket",
     source: "ACS microdata",
-    on: "sex, age, the bracket",
-    not: "education, race, place",
-    local: "national",
+    on: "sex, age, education, the bracket",
+    not: "race, place",
+    local: "national (the brackets themselves are local)",
   },
   {
     step: "Race/ethnicity",
