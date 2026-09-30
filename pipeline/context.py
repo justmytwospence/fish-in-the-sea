@@ -106,6 +106,116 @@ for sex in (1, 2):
     health["bmiAbove"][str(sex)] = rows
 print("health", {k: v for k, v in health.items() if k != "bmiAbove"})
 
+# --------------------------------------- conditional rates (race, degree)
+
+# Smoking and BMI thresholds by sex, age band, degree and race/ethnicity, from
+# a weighted logistic model on all NHANES adults (so partner status is a term,
+# not a filter): sex x age band, degree and race each with sex-specific
+# effects, and not living with a partner. Predictions are for unpartnered
+# adults. Race codes follow the site: 0 White, 1 Black, 2 Hispanic, 3 Asian,
+# 4 other (non-Hispanic unless noted).
+RACE_OF = {1: 2, 2: 2, 3: 0, 4: 1, 6: 3, 7: 4}
+ad = nh.copy()
+ad["race"] = ad.RIDRETH3.map(RACE_OF)
+ad["ba"] = np.where(ad.DMDEDUC2.isna(), np.nan, (ad.DMDEDUC2 == 5).astype(float))
+ad["unp"] = np.where(ad.DMDMARTZ.isin([1, 2, 3]), ad.DMDMARTZ.isin([2, 3]).astype(float), np.nan)
+ad["band"] = ad.RIDAGEYR.apply(lambda a: band_of(a, BANDS))
+ad = ad[ad.race.notna() & ad.ba.notna() & ad.unp.notna() & (ad.band >= 0)]
+
+
+def design(sex, band, ba, race, unp):
+    """Feature rows for arrays of attributes."""
+    sex, band, ba, race, unp = (np.asarray(x, dtype=float) for x in (sex, band, ba, race, unp))
+    f = (sex == 2).astype(float)
+    cols = [np.ones_like(f)]
+    for sx in (1, 2):
+        for b in range(len(BANDS)):
+            if (sx, b) != (1, 0):
+                cols.append(((sex == sx) & (band == b)).astype(float))
+    cols += [ba, ba * f, unp, unp * f]
+    for r in range(1, 5):
+        cols += [(race == r).astype(float), (race == r) * f]
+    return np.column_stack(cols)
+
+
+def fit_logit(X, y, w, ridge=1.0):
+    """Weighted logistic regression by IRLS, lightly ridged."""
+    w = w / w.mean()
+    beta = np.zeros(X.shape[1])
+    for _ in range(50):
+        mu = 1 / (1 + np.exp(-(X @ beta)))
+        W = w * mu * (1 - mu)
+        H = X.T @ (X * W[:, None]) + ridge * np.eye(X.shape[1])
+        g = X.T @ (w * (y - mu)) - ridge * beta
+        step = np.linalg.solve(H, g)
+        beta += step
+        if np.abs(step).max() < 1e-8:
+            break
+    return beta
+
+
+def fitted(col):
+    d = ad[ad[col].notna()]
+    return fit_logit(design(d.RIAGENDR, d.band, d.ba, d.race, d.unp), d[col].values.astype(float), d.w.values)
+
+
+def predict(beta, sex, band, ba, race, unp):
+    return 1 / (1 + np.exp(-(design(sex, band, ba, race, unp) @ beta)))
+
+
+ad["smoke"] = np.where(ad.SMQ020.isna(), np.nan, ((ad.SMQ020 == 1) & ad.SMQ040.isin([1, 2])).astype(float))
+models = {"smoke": fitted("smoke")}
+for t in BMI_CUTS:
+    ad[f"bmi{t}"] = np.where(ad.BMXBMI.isna(), np.nan, (ad.BMXBMI >= t).astype(float))
+    models[f"bmi{t}"] = fitted(f"bmi{t}")
+
+grid = [(sx, b, ba, r) for sx in (1, 2) for b in range(len(BANDS)) for ba in (0, 1) for r in range(5)]
+cond = {"races": 5, "smoke": {}, "bmiAbove": {}, "height": {}}
+for sx in (1, 2):
+    cond["smoke"][str(sx)] = [[[round(float(predict(models["smoke"], sx, b, ba, r, 1)[0]), 4) for r in range(5)]
+                               for ba in (0, 1)] for b in range(len(BANDS))]
+    rows = []
+    for b in range(len(BANDS)):
+        by_ba = []
+        for ba in (0, 1):
+            by_r = []
+            for r in range(5):
+                v = [float(predict(models[f"bmi{t}"], sx, b, ba, r, 1)[0]) for t in BMI_CUTS]
+                v = np.minimum.accumulate(v)  # share at or above must fall as the cutoff rises
+                by_r.append([round(float(x), 4) for x in v])
+            by_ba.append(by_r)
+        rows.append(by_ba)
+    cond["bmiAbove"][str(sx)] = rows
+print("conditional smoking, women 25-34, [no degree, degree] x [W,B,H,A,O]:", cond["smoke"]["2"][1])
+print("conditional BMI 30+, women 25-34:", [[r[10] for r in x] for x in cond["bmiAbove"]["2"][1]])
+
+# Height by sex, age band and race: measured (current cycle), all adults.
+hh = cur.copy()
+hh["race"] = hh.RIDRETH3.map(RACE_OF)
+for sex in (1, 2):
+    by_band = []
+    for lo, hi in HEIGHT_BANDS:
+        g0 = hh[(hh.RIAGENDR == sex) & hh.RIDAGEYR.between(lo, hi)]
+        all_h = g0.BMXHT.values / 2.54
+        m_all = wmean(all_h, g0.w.values)
+        sd_all = math.sqrt(wmean((all_h - m_all) ** 2, g0.w.values))
+        by_r = []
+        for r in range(5):
+            g = g0[g0.race == r]
+            n = len(g)
+            if n < 20:
+                by_r.append([round(m_all, 2), round(sd_all, 2)])
+                continue
+            h = g.BMXHT.values / 2.54
+            m = wmean(h, g.w.values)
+            sd = math.sqrt(wmean((h - m) ** 2, g.w.values))
+            k = n / (n + 10)  # shrink small groups toward the band's overall
+            by_r.append([round(k * m + (1 - k) * m_all, 2), round(k * sd + (1 - k) * sd_all, 2)])
+        by_band.append(by_r)
+    cond["height"][str(sex)] = by_band
+print("height women 20-39 by race [mean, sd]:", cond["height"]["2"][0])
+health["cond"] = cond
+
 # ------------------------------------------------------------ BRFSS 2024
 
 SOCRATA = "https://data.cdc.gov/resource/{}.json?$limit=50000&$where={}"
@@ -179,6 +289,24 @@ fips_to_abbr = pd.read_csv(RAW / "Geos20245YR.txt", sep="|", dtype=str, usecols=
 fips_to_abbr = dict(fips_to_abbr[fips_to_abbr.SUMLEVEL == "040"][["STATE", "STUSAB"]].values)
 market_counties = json.loads((ROOT / "market_counties.json").read_text())
 
+# Each place's adults by sex, age band, degree, race and partner status, and
+# what the national models above predict for them: the local shift is how far
+# the place's BRFSS rate sits from the US BRFSS rate, minus how far its make-up
+# alone would put it (so composition isn't counted twice, and the
+# self-report bias in BRFSS cancels).
+import duckdb  # noqa: E402
+
+comp = duckdb.sql(f"select * from '{ROOT / 'market_comp.parquet'}'").df()
+comp["band"] = comp.band.astype(int)
+
+
+def predicted(df, key):
+    return float(np.average(predict(models[key], df.sex, df.band, df.ba, df.race, df.unp), weights=df.w))
+
+
+us_pred = {k: predicted(comp, k) for k in ("smoke", "bmi25", "bmi30")}
+pred_by_market = {m_id: {k: predicted(g, k) for k in ("smoke", "bmi25", "bmi30")} for m_id, g in comp.groupby("market")}
+
 out_markets = {}
 for m in idx["markets"]:
     cb = m.get("cbsa")
@@ -191,11 +319,13 @@ for m in idx["markets"]:
         loc, src = state_r[st], "state"
     else:
         loc, src = us, "us"
+    pm = pred_by_market.get(m["id"], us_pred)
+    net = lambda key, pk: logit(loc[key]) - logit(us[key]) - (logit(pm[pk]) - logit(us_pred[pk]))  # noqa: E731
     rec = {
         "src": src,
-        "smoke": round(logit(loc["smoke"]) - logit(us["smoke"]), 3),
-        "obese": round(logit(loc["obese"]) - logit(us["obese"]), 3),
-        "over": round(logit(loc["over"]) - logit(us["over"]), 3),
+        "smoke": round(net("smoke", "smoke"), 3),
+        "obese": round(net("obese", "bmi30"), 3),
+        "over": round(net("over", "bmi25"), 3),
         "localSmoke": round(loc["smoke"], 3),
         "localObese": round(loc["obese"], 3),
     }

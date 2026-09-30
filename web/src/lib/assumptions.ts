@@ -206,8 +206,14 @@ export const HEIGHT_MAX = 84;
 
 // Share of people of `sex` and `age` between `lo` and `hi` inches inclusive,
 // treating heights as rounded to the inch.
-export function heightRangeShare(sex: Sex, age: number, lo: number, hi: number): number {
-  const { mean, sd } = heightDist(sex, age);
+export function heightRangeShare(
+  sex: Sex,
+  age: number,
+  lo: number,
+  hi: number,
+  dist: { mean: number; sd: number } = heightDist(sex, age),
+): number {
+  const { mean, sd } = dist;
   const top = hi >= HEIGHT_MAX ? 1 : normCdf((hi + 0.5 - mean) / sd);
   const bottom = lo <= HEIGHT_MIN ? 0 : normCdf((lo - 0.5 - mean) / sd);
   return Math.max(0, top - bottom);

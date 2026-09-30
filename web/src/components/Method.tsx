@@ -105,14 +105,15 @@ export default function Method({ dataYear }: { dataYear: string }) {
           want kids. The unsure (about 4%) are never ruled out. It&apos;s national, and intentions change.
         </p>
         <p>
-          <strong>Height and health.</strong> The height range uses measured heights by sex and age from{" "}
-          <Src s={SOURCES.nhanes} />. Smoking and BMI start from NHANES rates for unpartnered adults by sex and age
-          (BMI is measured, not self-reported; the slider uses the share at or above each whole-number BMI), then
-          shift up or down by how the metro, or its state where the CDC
-          doesn&apos;t survey the metro, compares with the US in the <Src s={SOURCES.brfss} />. They&apos;re treated as
-          independent of the Census filters, which overstates the pool slightly when you combine them (smoking falls
-          with education, for example). The 2024 vote in the context card sums county results from{" "}
-          <Src s={SOURCES.election} />.
+          <strong>Height and health.</strong> The height range uses measured heights from{" "}
+          <Src s={SOURCES.nhanes} /> by sex, age and race/ethnicity. Smoking and BMI (measured, not self-reported)
+          come from a model of NHANES adults by sex, age, degree (bachelor&apos;s or not), race/ethnicity and whether
+          they live with a partner, used for the unpartnered; so a college-grad filter now finds fewer smokers, and
+          BMI differs by race the way it really does. Each place is then shifted by how its 2024{" "}
+          <Src s={SOURCES.brfss} /> rate (or its state&apos;s, where the CDC doesn&apos;t survey the metro) differs from the
+          US beyond what its race, education and age make-up already explains, so a place isn&apos;t counted twice for
+          its demographics. None of these depend on income, and education only as degree or not. The 2024 vote in
+          the context card sums county results from <Src s={SOURCES.election} />.
         </p>
         <div>
           <p>

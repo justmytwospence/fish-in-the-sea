@@ -40,6 +40,13 @@ export interface HealthNational {
   over: Record<"1" | "2", number[]>;
   bmiCuts?: number[]; // whole-number BMI thresholds
   bmiAbove?: Record<"1" | "2", number[][]>; // [band][cut]: share at or above
+  // Unpartnered rates by degree (0 none, 1 bachelor's or more) and race, from
+  // a national model (see context.py); height by race for all adults.
+  cond?: {
+    smoke: Record<"1" | "2", number[][][]>; // [band][degree][race]
+    bmiAbove: Record<"1" | "2", number[][][][]>; // [band][degree][race][cut]
+    height: Record<"1" | "2", number[][][]>; // [height band][race] = [mean, sd]
+  };
 }
 
 export interface MarketCtx {
@@ -206,15 +213,32 @@ export const cellOf = (c: number) => ({
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 const logit = (p: number) => Math.log(p / (1 - p));
 
-// National rate for unpartnered adults of this sex and age (NHANES), shifted
-// by the metro's (or state's) difference from the US on the log-odds scale.
-function healthRate(g: Global, key: "smoke" | "obese" | "over", sex: Sex, age: number, marketId: string) {
+// Rate for unpartnered adults of this sex and age (NHANES), and of this
+// degree and race when given, shifted by how the place differs from the US
+// beyond its make-up, on the log-odds scale (see context.py).
+function healthRate(g: Global, key: "smoke" | "obese" | "over", sex: Sex, age: number, marketId: string, ba?: number, race?: number) {
   const h = g.health;
   if (!h) return null;
+  const sx = String(sex) as "1" | "2";
   const i = Math.max(0, h.bands.findIndex(([lo, hi]) => age >= lo && age <= hi));
-  const base = h[key][String(sex) as "1" | "2"][i];
+  let base = h[key][sx][i];
+  if (h.cond && ba !== undefined && race !== undefined) {
+    if (key === "smoke") base = h.cond.smoke[sx][i][ba][race];
+    else {
+      const k = h.bmiCuts?.indexOf(key === "obese" ? 30 : 25) ?? -1;
+      if (k >= 0) base = h.cond.bmiAbove[sx][i][ba][race][k];
+    }
+  }
   const shift = g.ctx?.[marketId]?.[key] ?? 0;
   return sigmoid(logit(Math.min(0.98, Math.max(0.02, base))) + shift);
+}
+
+// Measured height distribution for this sex, age and race (NHANES).
+function heightFor(g: Global, sex: Sex, age: number, race: number) {
+  const t = g.health?.cond?.height?.[String(sex) as "1" | "2"];
+  if (!t) return undefined;
+  const [mean, sd] = t[age < 40 ? 0 : age < 60 ? 1 : 2][race];
+  return { mean, sd };
 }
 
 // Default height rule: men seeking women want them no taller, women seeking
@@ -245,12 +269,14 @@ const incomeBracket = (k: number) => INC_FLOORS.filter((e) => k >= e).length - 1
 // Share of people at or above BMI `t` (a whole number, 20-40) for this sex and
 // age: NHANES, shifted like the obesity and overweight rates (the overweight
 // shift at 25 and below, the obesity shift at 30 and above, blended between).
-function bmiRate(g: Global, sex: Sex, age: number, marketId: string, t: number) {
+function bmiRate(g: Global, sex: Sex, age: number, marketId: string, t: number, ba?: number, race?: number) {
   const h = g.health;
   const k = h?.bmiCuts?.indexOf(t) ?? -1;
   if (!h?.bmiAbove || k < 0) return null;
+  const sx = String(sex) as "1" | "2";
   const i = Math.max(0, h.bands.findIndex(([lo, hi]) => age >= lo && age <= hi));
-  const base = h.bmiAbove[String(sex) as "1" | "2"][i][k];
+  const base =
+    h.cond && ba !== undefined && race !== undefined ? h.cond.bmiAbove[sx][i][ba][race][k] : h.bmiAbove[sx][i][k];
   const c = g.ctx?.[marketId];
   const so = c?.over ?? 0;
   const sb = c?.obese ?? 0;
@@ -315,6 +341,7 @@ function pool(
   lo: number,
   hi: number,
   withFilters: boolean,
+  lean = false, // skip the who's-left breakdowns (rankings don't show them)
 ) {
   const sx = String(sex) as "1" | "2";
   const shares = g.ageShares[String(s.division)][sx];
@@ -329,9 +356,11 @@ function pool(
     income: attrMask(q, "income", withFilters),
   };
   const f = q.filters;
-  const rate = (key: "smoke" | "obese" | "over", a: number) => healthRate(g, key, sex, a, s.id);
-  // Health filters: independent of the Census attributes given sex and age.
-  const fSmoke = (a: number) => (withFilters && f.nonSmoker ? 1 - (rate("smoke", a) ?? 0) : 1);
+  // Health rates by age, degree (0 none, 1 bachelor's or more) and race.
+  const rate = (key: "smoke" | "obese" | "over", a: number, ba: number, race: number) =>
+    healthRate(g, key, sex, a, s.id, ba, race);
+  const fSmoke = (a: number, ba: number, race: number) =>
+    withFilters && f.nonSmoker ? 1 - (rate("smoke", a, ba, race) ?? 0) : 1;
   // Religion mix for this sex and age: national GSS rates shifted by the
   // metro's (or state's) composition. Independent of everything else.
   const relMix = (a: number) => {
@@ -376,7 +405,8 @@ function pool(
     const i = K.bands.findIndex(([lo, hi]) => a >= lo && a <= hi);
     return K.rates[sx][i < 0 ? (a < K.bands[0][0] ? 0 : K.bands.length - 1) : i][kids][edu];
   };
-  const fBmi = (a: number) => (withFilters && f.bmiMax ? 1 - (bmiRate(g, sex, a, s.id, f.bmiMax) ?? 0) : 1);
+  const fBmi = (a: number, ba: number, race: number) =>
+    withFilters && f.bmiMax ? 1 - (bmiRate(g, sex, a, s.id, f.bmiMax, ba, race) ?? 0) : 1;
   // An income floor inside a bracket keeps that bracket's share at or above
   // it (national, by sex and age bin); other brackets are all in or all out.
   const incBr = incomeBracket(f.incomeMin);
@@ -491,20 +521,31 @@ function pool(
       // the same for everyone ("age") or per group ("group"). For one age,
       // `chain` gives the share of pFinal left after each step, and what's
       // left of each group after all of them.
-      type SurveyStep = { age: (a: number) => number } | { group: (a: number, gr: (typeof GROUPS)[number]) => number };
+      // Group steps name the few attributes they depend on (`key`, up to
+      // `keys` values), so each value is computed once per age.
+      type Gr = (typeof GROUPS)[number];
+      type SurveyStep =
+        | { age: (a: number) => number }
+        | { group: (a: number, gr: Gr) => number; key: (gr: Gr) => number; keys: number };
+      const byRace = { key: (gr: Gr) => gr.race, keys: NRACE };
+      const byDegreeRace = { key: (gr: Gr) => (gr.edu >= 1 ? NRACE : 0) + gr.race, keys: 2 * NRACE };
+      const off = { age: () => 1 };
       const surveySteps: SurveyStep[] = [
-        { age: (a) => (hf ? heightRangeShare(sex, a, hf.lo, hf.hi) : 1) },
-        { age: (a) => fSmoke(a) },
+        hf ? { group: (a, gr) => heightRangeShare(sex, a, hf.lo, hf.hi, heightFor(g, sex, a, gr.race)), ...byRace } : off,
+        withFilters && f.nonSmoker ? { group: (a, gr) => fSmoke(a, gr.edu >= 1 ? 1 : 0, gr.race), ...byDegreeRace } : off,
         { age: (a) => fRel(a) },
         { age: (a) => fPol(a) },
-        {
-          group: (a, gr) => {
-            if (!wantPicked) return 1;
-            const m = wantMix(a, gr.edu, gr.kids);
-            return m ? wantPicked.reduce((t, r) => t + m[r], 0) : 1;
-          },
-        },
-        { age: (a) => fBmi(a) },
+        wantPicked
+          ? {
+              group: (a, gr) => {
+                const m = wantMix(a, gr.edu, gr.kids);
+                return m ? wantPicked.reduce((t, r) => t + m[r], 0) : 1;
+              },
+              key: (gr) => gr.edu * 2 + gr.kids,
+              keys: 6,
+            }
+          : off,
+        withFilters && f.bmiMax ? { group: (a, gr) => fBmi(a, gr.edu >= 1 ? 1 : 0, gr.race), ...byDegreeRace } : off,
         { age: (a) => (q.model.orientation ? attraction(sex, towards, a) : 1) },
         { age: (a) => (q.model.relationship ? 1 - inRelationship(sex, a) : 1) },
         { age: (a) => (q.model.looking ? looking(sex, a) : 1) },
@@ -520,9 +561,12 @@ function pool(
             return total;
           }
           total = 0;
+          const memo = new Float64Array(step.keys).fill(NaN);
           for (let gi = 0; gi < NGROUP; gi++) {
             if (left[gi] <= 0) continue;
-            left[gi] *= step.group(a, GROUPS[gi]);
+            const k = step.key(GROUPS[gi]);
+            if (Number.isNaN(memo[k])) memo[k] = step.group(a, GROUPS[gi]);
+            left[gi] *= memo[k];
             total += left[gi];
           }
           return total;
@@ -557,10 +601,34 @@ function pool(
         // steps, to carry down to the cells inside it; and kids someday by
         // group (it depends on education and kids).
         const ratio = new Float64Array(NGROUP);
+        const cap = withFilters && f.bmiMax ? f.bmiMax : 0;
+        const health = new Map<number, [number, number, number, number]>();
+        const healthOf = (ba: number, race: number) => {
+          const k = ba * NRACE + race;
+          let h = health.get(k);
+          if (!h) {
+            h = [
+              f.nonSmoker && withFilters ? 0 : (rate("smoke", a, ba, race) ?? 0),
+              rate("obese", a, ba, race) ?? 0,
+              rate("over", a, ba, race) ?? 0,
+              cap ? (bmiRate(g, sex, a, s.id, cap, ba, race) ?? 0) : 0,
+            ];
+            health.set(k, h);
+          }
+          return h;
+        };
         for (let gi = 0; gi < NGROUP; gi++) {
           ratio[gi] = G[gi] > 0 ? left[gi] / G[gi] : 0;
           const v = base * sh[i] * left[gi];
-          if (!(v > 0)) continue;
+          if (!(v > 0) || lean) continue;
+          // Health shares among those left (zero for anything filtered out);
+          // under a BMI cap, the share still over 25 (or 30) among those kept.
+          const gr = GROUPS[gi];
+          const [sm, obRaw, ovRaw, capAbove] = healthOf(gr.edu >= 1 ? 1 : 0, gr.race);
+          const keptB = Math.max(0.01, 1 - capAbove);
+          if (comp.smoke !== null) comp.smoke += v * sm;
+          if (comp.obese !== null) comp.obese += (v * (cap ? Math.max(0, obRaw - capAbove) : obRaw)) / (cap ? keptB : 1);
+          if (comp.over !== null) comp.over += (v * (cap ? Math.max(0, ovRaw - capAbove) : ovRaw)) / (cap ? keptB : 1);
           const wm = wantMix(a, GROUPS[gi].edu, GROUPS[gi].kids);
           if (!wm) continue;
           let wkSum = 0;
@@ -586,16 +654,6 @@ function pool(
           out.typed.pol[(a - lo) * NPOL + r] += v;
           comp.politics[r] += v;
         }
-        // Health shares among those left (zero for anything filtered out).
-        const sm = f.nonSmoker && withFilters ? 0 : (rate("smoke", a) ?? 0);
-        const obRaw = rate("obese", a) ?? 0;
-        const ovRaw = rate("over", a) ?? 0;
-        // Under a BMI cap, the share still over 25 (or 30) among those kept.
-        const cap = withFilters && f.bmiMax ? f.bmiMax : 0;
-        const capAbove = cap ? (bmiRate(g, sex, a, s.id, cap) ?? 0) : 0;
-        const keptB = Math.max(0.01, 1 - capAbove);
-        const ob = cap ? Math.max(0, obRaw - capAbove) / keptB : obRaw;
-        const ov = cap ? Math.max(0, ovRaw - capAbove) / keptB : ovRaw;
         for (let c = 0; c < NCELL; c++) {
           if (!(p[c] > 0) || !iw[c]) continue;
           const { edu, kids, inc, par } = cellOf(c);
@@ -613,9 +671,6 @@ function pool(
           comp.parents[par] += v;
           comp.marital[mg as "nm" | "div" | "wid" | "sep"] += v;
           comp.total += v;
-          if (comp.smoke !== null) comp.smoke += v * sm;
-          if (comp.obese !== null) comp.obese += v * ob;
-          if (comp.over !== null) comp.over += v * Math.max(0, ov);
         }
       });
     }
@@ -637,7 +692,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   const M = q.me.sex;
   const lo = Math.max(g.ageMin, Math.min(q.seek.lo, q.seek.hi));
   const hi = Math.min(g.ageMax, Math.max(q.seek.lo, q.seek.hi));
-  const t = pool(s, g, q, T, M, lo, hi, true);
+  const t = pool(s, g, q, T, M, lo, hi, true, !detail);
   const who = noun(T);
   const steps: Step[] = [];
   const push = (key: string, label: string, dropped: string, a: Acc, kind: StepKind, sources: Source[], note: string) =>
@@ -689,11 +744,11 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
           ? [`At least ${ft(hf.lo)}`, "shorter"]
           : [`Between ${ft(hf.lo)} and ${ft(hf.hi)}`, "outside that range"];
     push("height", label, gone, t.height, "survey", [SOURCES.nhanes],
-      "Share of this sex and age in the height range, from measured heights in CDC NHANES (normal distributions by sex and age). Assumes height is unrelated to the other steps.");
+      "Share in the height range for each sex, age and race/ethnicity, from measured heights in CDC NHANES (normal distributions). Depends on race among who's left; assumed unrelated to education and everything else. National.");
   }
   if (q.filters.nonSmoker && g.health)
     push("smoke", "Non-smokers", "smoke", t.smoke, "survey", [SOURCES.nhanes, SOURCES.brfss],
-      "Removes current cigarette smokers. National rates for unpartnered adults by sex and age (NHANES 2017-2023), shifted up or down by how this metro (or its state) compares with the US in the 2024 BRFSS. Assumes smoking is unrelated to the Census filters above; it actually falls with education.");
+      "Removes current cigarette smokers. Rates for unpartnered adults by sex, age, degree (bachelor's or not) and race/ethnicity from a model of NHANES 2017-2023, shifted by how the place's (or its state's) 2024 BRFSS rate differs from the US, beyond what its race, education and age make-up already explains. Follows the degree and race mix of who's left; assumed unrelated to income and the other filters.");
   if (q.filters.religions.length && g.religion) {
     const names = [...q.filters.religions].sort().map((r) => RELIGIONS[r]);
     push("religion", names.join(", "), "other religions (or none)", t.religion, "survey", [SOURCES.gss, SOURCES.religionLocal],
@@ -721,7 +776,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   if (q.filters.bmiMax && g.health)
     push("bmi", `BMI under ${q.filters.bmiMax}`, `BMI ${q.filters.bmiMax} or higher`,
       t.bmi, "survey", [SOURCES.nhanes, SOURCES.brfss],
-      "Measured (not self-reported) BMI for unpartnered adults by sex and age from NHANES 2017-2023, shifted by how this metro (or its state) compares with the US on 2024 BRFSS overweight (for cutoffs up to 25) and obesity (30 and up; blended between). BMI is a blunt instrument; this is a population estimate, not a judgment.");
+      "Measured (not self-reported) BMI for unpartnered adults by sex, age, degree and race/ethnicity from a model of NHANES 2017-2023, shifted by how the place's (or its state's) 2024 BRFSS rate differs from the US, beyond what its race, education and age make-up already explains (overweight for cutoffs up to 25, obesity for 30 and up, blended between). Assumed unrelated to income and the other filters. BMI is a blunt instrument; this is a population estimate, not a judgment.");
   if (q.model.orientation)
     push("orientation", `Into ${noun(M)}`, `not into ${noun(M)}`, t.orientation, "survey", [SOURCES.gallup, SOURCES.nsfg],
       "National rates by sex and age (not local). Bisexual people count as attracted to both.");
@@ -755,7 +810,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
       f.politics.length > 0 ||
       f.wantKids.length > 0 ||
       heightFilter(q) !== null;
-    const base = filtered ? pool(s, g, q, T, M, lo, hi, false) : t;
+    const base = filtered ? pool(s, g, q, T, M, lo, hi, false, !detail) : t;
     const relPairing = g.religion?.pairing[`${T}${M}`];
     const polPairing = g.politics?.pairing[`${T}${M}`];
     const market = compete(choice, base.typed, comp.typed, q, detail, relPairing, polPairing);

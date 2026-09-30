@@ -11,3 +11,4 @@ web/next-env.d.ts
 .claude/worktrees/
 pipeline/raw
 pipeline/market_counties.json
+pipeline/market_comp.parquet

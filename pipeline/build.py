@@ -565,5 +565,17 @@ for sex in (1, 2):
     dict(bins=BINS, marg=MARG, ageMin=AGE_MIN, ageMax=AGE_MAX,
          ageShares=age_shares, partnerCdf=cdfs, incomeCuts=INC_CUTS, incomeAbove=income_above, raceTilt=race_tilt),
     separators=(",", ":")))
+# Each market's adults by sex, age band, degree, race and partner status, for
+# context.py to separate local health and politics rates from local
+# composition (pipeline-only output).
+HEALTH_BANDS = "case when age < 25 then 0 when age < 35 then 1 when age < 45 then 2 when age < 55 then 3 when age < 65 then 4 else 5 end"
+con.execute(f"""
+  copy (
+    select market, sex, {HEALTH_BANDS} band, (edu >= 1)::int ba, race,
+      (marg < 4 and cohab = 0)::int unp, sum(w * f) w
+    from p join pw using (stpuma) group by all
+  ) to '{ROOT / "market_comp.parquet"}' (format parquet)
+""")
+
 (ROOT / "market_counties.json").write_text(json.dumps({m["id"]: m["counties"] for m in markets}))
 print(f"  wrote {len(index)} markets, {len(plist)} places")

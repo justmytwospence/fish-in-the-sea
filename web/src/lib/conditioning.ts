@@ -42,16 +42,16 @@ export const CONDITIONING: Conditioning[] = [
   {
     step: "Height",
     source: "NHANES (measured)",
-    on: "sex, age",
-    not: "race, education, everything else",
-    local: "national",
+    on: "sex, age, race/ethnicity",
+    not: "education, everything else",
+    local: "national (varies by place only through race)",
   },
   {
     step: "Smoking",
     source: "NHANES, BRFSS",
-    on: "sex, age",
-    not: "education, race, income",
-    local: "shifted by the place's (or state's) adult smoking rate",
+    on: "sex, age, degree (bachelor's or not), race/ethnicity",
+    not: "income, religion, politics, kids",
+    local: "through its degree and race mix, plus its (or its state's) adult smoking rate beyond what that mix explains",
   },
   {
     step: "Religion",
@@ -77,9 +77,9 @@ export const CONDITIONING: Conditioning[] = [
   {
     step: "BMI",
     source: "NHANES (measured), BRFSS",
-    on: "sex, age",
-    not: "race, education, income",
-    local: "shifted by the place's (or state's) adult overweight and obesity rates",
+    on: "sex, age, degree (bachelor's or not), race/ethnicity",
+    not: "income, kids, everything else",
+    local: "through its degree and race mix, plus its (or its state's) adult overweight and obesity rates beyond what that mix explains",
   },
   {
     step: "Orientation",
