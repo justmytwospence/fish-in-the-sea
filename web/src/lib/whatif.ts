@@ -60,11 +60,11 @@ export function whatIfs(s: Shard, g: Global, q: Query, choice: Choice): { base: 
   }
   if (q.seek.lo > 18) {
     const lo = Math.max(18, q.seek.lo - AGE_STEP);
-    cands.push({ key: "younger", label: `Widen to ${lo}–${q.seek.hi}`, query: { ...q, seek: { ...q.seek, lo } } });
+    cands.push({ key: "younger", label: `Lower the age floor by a year (to ${lo})`, query: { ...q, seek: { ...q.seek, lo } } });
   }
   if (q.seek.hi < 90) {
     const hi = Math.min(90, q.seek.hi + AGE_STEP);
-    cands.push({ key: "older", label: `Widen to ${q.seek.lo}–${hi}`, query: { ...q, seek: { ...q.seek, hi } } });
+    cands.push({ key: "older", label: `Raise the age ceiling by a year (to ${hi})`, query: { ...q, seek: { ...q.seek, hi } } });
   }
 
   const options = cands.map((c) => {
