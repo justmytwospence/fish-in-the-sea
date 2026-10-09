@@ -12,3 +12,7 @@ web/next-env.d.ts
 pipeline/raw
 pipeline/market_counties.json
 pipeline/market_comp.parquet
+pipeline/audit-baseline/
+pipeline/recovery/
+web/test-results/
+web/playwright-report/
