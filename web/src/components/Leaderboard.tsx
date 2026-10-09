@@ -1,609 +1,97 @@
 "use client";
-
-import { useEffect, useMemo, useRef, useState } from "react";
-import { PARTS, type RankResponse, type Sort } from "@/lib/rank";
-import { SOURCES } from "@/lib/assumptions";
-import { noun, type Query } from "@/lib/model";
-import { fmt } from "@/lib/format";
-import { loadPlaceIndex, searchPlaces, type Hit, type PlaceIndex } from "@/lib/place-search";
-import { statesOf } from "@/lib/states";
-import MetroChart from "./MetroChart";
-
-export type Row = RankResponse["all"][number];
-
-const MODES: { key: Sort; label: string; by: string; blurb: string }[] = [
-  { key: "raw", label: "Raw pool", by: "raw pool", blurb: "Most people through your sieve, ignoring competition. Big metros win, obviously." },
-  {
-    key: "adjusted",
-    label: "Adjusted pool",
-    by: "adjusted pool",
-    blurb: "Your pool after adjusting for competition: the number to compare if you're weighing a move.",
-  },
-  {
-    key: "crowd",
-    label: "Least crowded",
-    by: "least crowded",
-    blurb: "Fewest competitors in the running per person in your pool. This is the market alone; it doesn't depend on you.",
-  },
-  {
-    key: "odds",
-    label: "Best odds",
-    by: "odds",
-    blurb: "The whole adjustment (adjusted ÷ raw): how uncrowded the market is combined with how you stack up there.",
-  },
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ARTIFACT_VERSION, PARTS, type RankResponse, type RankRow, type Sort } from '@/lib/rank';
+import type { Query } from '@/lib/model';
+import { parseQuery, serializeQuery } from '@/lib/query';
+import { fmt } from '@/lib/format';
+import { statesOf } from '@/lib/states';
+import PlaceSearch from './PlaceSearch';
+import MetroChart from './MetroChart';
+export type Row = RankRow;
+const MODES: {key:Sort;label:string;description:string}[] = [
+  {key:'raw',label:'Estimated pool',description:'People estimated to pass the filters. Population size matters.'},
+  {key:'adjusted',label:'Competition index',description:'A comparative index, not a reachable headcount or a validated moving recommendation.'},
+  {key:'crowd',label:'Least crowded',description:'Modeled competitors per target before your preferences; lower is less crowded.'},
+  {key:'odds',label:'Model multiplier',description:'Competition adjustment relative to the pool—not a probability of dating success.'},
 ];
-
-// Preset sets of places, each from a published definition.
-const has = (t: string) => (r: Row) => r[8].includes(t);
-const SETS: { key: string; label: string; noun: string; test: (r: Row) => boolean; blurb: React.ReactNode }[] = [
-  {
-    key: "mountain",
-    label: "Mountain towns",
-    noun: "mountain towns",
-    test: has("mountain"),
-    blurb: (
-      <>
-        Places under 500,000 where most townspeople live in mountain terrain by the UNEP-WCMC definition
-        (elevation, slope and relief within 7 km): <Src s={SOURCES.mountains} />, <Src s={SOURCES.terrainTiles} />.
-      </>
-    ),
-  },
-  {
-    key: "ski",
-    label: "Mountain resorts",
-    noun: "mountain resort towns",
-    test: (r) => r[8].includes("mountain") && r[8].includes("resort"),
-    blurb: (
-      <>
-        Mountain towns that live on recreation (recreation-dependent in the <Src s={SOURCES.ersTypology} />): ski
-        and outdoor towns.
-      </>
-    ),
-  },
-  {
-    key: "resort",
-    label: "Resort & vacation",
-    noun: "resort areas",
-    test: has("resort"),
-    blurb: (
-      <>
-        Recreation-dependent in the <Src s={SOURCES.ersTypology} />: jobs, earnings and seasonal homes tied to
-        recreation and tourism. Beach and lake towns as well as mountains.
-      </>
-    ),
-  },
-  {
-    key: "college",
-    label: "College towns",
-    noun: "college towns",
-    test: has("college"),
-    blurb: <>College and graduate students make up 15% or more of residents (US: about 6%), from the ACS.</>,
-  },
-  {
-    key: "retire",
-    label: "Retirement havens",
-    noun: "retirement destinations",
-    test: has("retire"),
-    blurb: (
-      <>
-        Retirement destinations in the <Src s={SOURCES.ersTypology} />: older residents growing fast through people
-        moving in. Know your competition.
-      </>
-    ),
-  },
-  { key: "big", label: "Big cities", noun: "big cities", test: has("big"), blurb: <>Metro areas of a million or more.</> },
-  {
-    key: "small",
-    label: "Small towns & rural",
-    noun: "small-town areas",
-    test: has("small"),
-    blurb: <>Micropolitan areas and counties outside any metro or micro area.</>,
-  },
-];
-
-function Src({ s }: { s: { label: string; url: string } }) {
-  return (
-    <a href={s.url} target="_blank" rel="noreferrer" className="underline">
-      {s.label}
-    </a>
-  );
-}
-
-const value = (sort: Sort, r: Row) => (sort === "raw" ? r[2] : sort === "adjusted" ? r[3] : sort === "odds" ? r[4] : r[7]);
-
-// Rank rows by the chosen measure (best first); places too small to have
-// odds or crowding go last.
-function rank(rows: Row[], sort: Sort) {
-  return [...rows].sort((a, b) => {
-    const va = value(sort, a);
-    const vb = value(sort, b);
-    if (sort === "crowd") return (va || Infinity) - (vb || Infinity);
-    return vb - va;
-  });
-}
-
-interface Pin {
-  market: string;
-  label: string; // the town searched for
-}
-
-const STORE = "fish-in-the-sea:elsewhere";
-const MAX_PINS = 6;
-const TOP = 5; // leaders highlighted in the chart
-const FIRST = 10; // leaders listed before "show more"
-const MORE = 25;
-
-// Columns of the table; clicking one ranks by it.
-const COLS: { key: Sort; label: string; title: string }[] = [
-  { key: "raw", label: "Raw pool", title: "People through your sieve (bars on a log scale)" },
-  { key: "crowd", label: "Competitors", title: "Competitors in the running per person in your pool (fewer is better)" },
-  { key: "odds", label: "Odds", title: "Adjusted ÷ raw: the market's crowding combined with how you stack up there" },
-  { key: "adjusted", label: "Adjusted", title: "Your pool after adjusting for competition (bars on a log scale)" },
-];
-
-const TAG_LABEL: Record<string, string> = {
-  mountain: "Mountain",
-  resort: "Resort",
-  college: "College town",
-  retire: "Retirement",
-};
-
-// Kind of place from its id and tags (rural county ids end in -c + FIPS).
-function kindOf(r: Row) {
-  if (/-c\d{5}$/.test(r[0])) return "Rural county";
-  return r[8].includes("small") ? "Micro area" : "Metro";
-}
-
-const compact = (n: number) =>
-  n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n));
-
-function cell(key: Sort, r: Row) {
-  if (key === "raw") return fmt(r[2]);
-  if (key === "adjusted") return fmt(r[3]);
-  if (key === "odds") return r[4] > 0 ? `×${r[4].toFixed(2)}` : "n/a";
-  return r[7] > 0 ? r[7].toFixed(2) : "n/a";
-}
-
-// Bar length for the ranking column, relative to the leader in view. Pools
-// span five orders of magnitude, so theirs are on a log scale.
-function barShare(key: Sort, r: Row, best: number) {
-  const v = value(key, r);
-  if (!v || !best) return 0;
-  if (key === "crowd") return best / v;
-  if (key === "odds") return v / best;
-  return best > 1 ? Math.log10(Math.max(1, v)) / Math.log10(best) : 0;
-}
-
-function loadPrefs(): { sort?: Sort; set?: string | null; pins?: Pin[] } {
-  try {
-    return JSON.parse(localStorage.getItem(STORE) ?? "{}");
-  } catch {
-    return {};
-  }
-}
-
-export default function Leaderboard({ qs, query, onPick }: { qs: string; query: Query; onPick: (id: string) => void }) {
-  const [data, setData] = useState<{ qs: string; all: Row[] } | null>(null);
-  const [sort, setSort] = useState<Sort>("adjusted");
-  const [states, setStates] = useState<string[]>([]);
-  const [set, setSet] = useState<string | null>(null);
-  const [pins, setPins] = useState<Pin[]>([]);
-  const [shown, setShown] = useState(FIRST);
-  const restored = useRef(false);
-
-  // Restore the viewer's last ranking, set and pins (after hydration).
+const SETS = ['mountain','resort','college','retire','big','small'];
+const value = (s:Sort,r:Row) => s==='raw'?r.pool:s==='adjusted'?r.adjusted:s==='crowd'?r.competitors:r.multiplier;
+const cell = (s:Sort,r:Row) => { const v = value(s,r); return v===null ? 'Unavailable' : s==='odds' ? `×${v.toFixed(2)}` : s==='crowd'?v.toFixed(2):fmt(v); };
+export default function Leaderboard({ qs, query, onPick }: { qs:string; query:Query; onPick:(id:string)=>void }) {
+  const ref = useRef<HTMLElement>(null);
+  const [visible,setVisible] = useState(false);
+  const [data,setData] = useState<{key:string;rows:Row[]} | null>(null);
+  const [error,setError] = useState('');
+  const [retry,setRetry] = useState(0);
+  const [sort,setSort] = useState<Sort>('adjusted');
+  const [set,setSet] = useState('');
+  const [state,setState] = useState('');
+  const [pins,setPins] = useState<{market:string;label:string}[]>([]);
+  const [shown,setShown] = useState(10);
+  const rankKey = useMemo(() => { const q = parseQuery(new URLSearchParams(qs)); q.market='all'; return serializeQuery(q); },[qs]);
   useEffect(() => {
-    const p = loadPrefs();
-    /* eslint-disable react-hooks/set-state-in-effect */
-    if (p.sort && MODES.some((m) => m.key === p.sort)) setSort(p.sort);
-    if (p.set && SETS.some((s) => s.key === p.set)) setSet(p.set);
-    if (Array.isArray(p.pins)) setPins(p.pins.slice(0, MAX_PINS));
-    /* eslint-enable react-hooks/set-state-in-effect */
-    restored.current = true;
-  }, []);
+    const observer = new IntersectionObserver(([entry])=> { if(entry.isIntersecting) setVisible(true); },{rootMargin:'200px'});
+    observer.observe(ref.current!); return ()=>observer.disconnect();
+  },[]);
   useEffect(() => {
-    if (!restored.current) return;
-    try {
-      localStorage.setItem(STORE, JSON.stringify({ sort, set, pins }));
-    } catch {}
-  }, [sort, set, pins]);
-
-  useEffect(() => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => {
-      Promise.all(
-        Array.from({ length: PARTS }, (_, part) =>
-          fetch(`/api/rank?v=11&part=${part}&${qs}`, { signal: ctrl.signal }).then((r) => r.json() as Promise<RankResponse>),
-        ),
-      )
-        .then((parts) => setData({ qs, all: parts.flatMap((p) => p.all) }))
-        .catch(() => {});
-    }, 350);
-    return () => {
-      clearTimeout(t);
-      ctrl.abort();
-    };
-  }, [qs]);
-
-  const loading = !data || data.qs !== qs;
-  const all = useMemo(() => data?.all ?? [], [data]);
-  const allStates = useMemo(() => [...new Set(all.flatMap((r) => statesOf(r[1])))].sort(), [all]);
-  const preset = SETS.find((s) => s.key === set) ?? null;
-  const inView = useMemo(() => {
-    const st = (r: Row) => !states.length || statesOf(r[1]).some((s) => states.includes(s));
-    return (r: Row) => st(r) && (!preset || preset.test(r));
-  }, [states, preset]);
-  const rows = useMemo(() => all.filter(inView), [all, inView]);
-  const ranked = useMemo(() => rank(rows, sort), [rows, sort]);
-  const rankOf = useMemo(() => new Map(ranked.map((r, i) => [r[0], i])), [ranked]);
-  const byId = useMemo(() => new Map(all.map((r) => [r[0], r])), [all]);
-  const mode = MODES.find((m) => m.key === sort)!;
-  const mineIdx = rankOf.get(query.market) ?? -1;
-  const pinIds = new Set(pins.map((p) => p.market));
-
-  // The leaders, then your place and each pinned place with its neighbors,
-  // in rank order with gaps between runs.
-  const keep = new Set<number>();
-  for (let i = 0; i < Math.min(shown, ranked.length); i++) keep.add(i);
-  const around = (i: number, k: number) => {
-    for (let j = Math.max(0, i - k); j <= Math.min(ranked.length - 1, i + k); j++) keep.add(j);
-  };
-  if (mineIdx >= 0) around(mineIdx, pins.length ? 2 : 3);
-  for (const p of pins) {
-    const i = rankOf.get(p.market);
-    if (i !== undefined) around(i, 2);
-  }
-  const list: ({ rank: number; row: Row } | "gap")[] = [];
-  let prev = -1;
-  for (const i of [...keep].sort((a, b) => a - b)) {
-    if (prev >= 0 && i > prev + 1) list.push("gap");
-    list.push({ rank: i + 1, row: ranked[i] });
-    prev = i;
-  }
-  const topIds = new Set(ranked.slice(0, TOP).map((r) => r[0]));
-  const best = ranked.length ? value(sort, ranked[0]) : 0;
-  const neighborIds = new Set(mineIdx >= 0 ? ranked.slice(Math.max(0, mineIdx - 5), mineIdx + 6).map((r) => r[0]) : []);
-
-  const pick = (id: string) => {
-    onPick(id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-  const addPin = (h: Hit) => {
-    setPins((ps) => [...ps.filter((p) => p.market !== h.market), { market: h.market, label: h.label }].slice(-MAX_PINS));
-  };
-  const where = `${preset ? preset.noun : "places"}${states.length ? ` in ${states.join(", ")}` : ""}`;
-
-  return (
-    <section aria-label="Other cities" className="mt-16 border-t border-rule pt-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Elsewhere</p>
-      <h2 className="mt-3 font-display text-3xl tracking-tight">Should you move?</h2>
-
-      <div role="radiogroup" aria-label="Ranking" className="mt-6 inline-flex flex-wrap rounded-full border border-rule p-1">
-        {MODES.map((m) => (
-          <button
-            key={m.key}
-            role="radio"
-            aria-checked={m.key === sort}
-            onClick={() => setSort(m.key)}
-            className={`rounded-full px-3 py-1.5 text-sm transition-colors sm:px-4 ${
-              m.key === sort ? "bg-ink text-paper" : "text-muted hover:text-ink"
-            }`}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
-      <p className="mt-3 max-w-xl text-sm text-muted">{mode.blurb}</p>
-
-      <div className="mt-5 flex flex-wrap items-center gap-2 text-sm" role="radiogroup" aria-label="Kind of place">
-        <span className="text-muted">Only:</span>
-        {[{ key: null, label: "Everywhere" }, ...SETS].map((s) => (
-          <button
-            key={s.key ?? "all"}
-            type="button"
-            role="radio"
-            aria-checked={set === s.key}
-            onClick={() => setSet(s.key)}
-            className={`rounded-full border px-2.5 py-0.5 transition-colors ${
-              set === s.key ? "border-ink bg-ink text-paper" : "border-rule text-muted hover:border-ink hover:text-ink"
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-      {preset && <p className="mt-2 max-w-xl text-xs text-muted">{preset.blurb}</p>}
-
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-muted">States:</span>
-        {states.length === 0 && <span className="text-muted">all</span>}
-        {states.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setStates(states.filter((x) => x !== s))}
-            className="rounded-full border border-accent bg-accent px-2.5 py-0.5 text-paper"
-            aria-label={`Remove ${s}`}
-          >
-            {s} ×
-          </button>
-        ))}
-        <select
-          aria-label="Add a state"
-          className="rounded-md border border-rule bg-card px-2 py-1 text-ink"
-          value=""
-          onChange={(e) => e.target.value && setStates([...states, e.target.value])}
-        >
-          <option value="">Add a state…</option>
-          {allStates
-            .filter((s) => !states.includes(s))
-            .map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-        </select>
-        {states.length > 0 && (
-          <button type="button" onClick={() => setStates([])} className="text-muted underline hover:text-ink">
-            clear
-          </button>
-        )}
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-muted">Compare:</span>
-        <TownSearch onPick={addPin} />
-        {pins.map((p) => {
-          const r = byId.get(p.market);
-          const i = rankOf.get(p.market);
-          const town = p.label.split(",")[0];
-          return (
-            <span key={p.market} className="inline-flex items-center gap-1.5 rounded-full border border-ink py-0.5 pl-2.5 pr-1">
-              <button type="button" onClick={() => pick(p.market)} className="hover:underline" title={r?.[1] ?? p.label}>
-                {town}
-              </button>
-              <span className="tabular-nums text-muted">
-                {loading ? "…" : i !== undefined ? `#${i + 1}` : r ? "not in view" : ""}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPins(pins.filter((x) => x.market !== p.market))}
-                className="rounded-full px-1 text-muted hover:text-ink"
-                aria-label={`Stop comparing ${town}`}
-              >
-                ×
-              </button>
-            </span>
-          );
-        })}
-      </div>
-
-      {data && (
-        <p className="mt-4" aria-live="polite">
-          {mineIdx >= 0 ? (
-            <>
-              Yours ranks <strong>#{mineIdx + 1}</strong> of {fmt(ranked.length)} {where} by {mode.by}.
-            </>
-          ) : (
-            <>
-              {fmt(ranked.length)} {where}. Yours isn&apos;t among them.
-            </>
-          )}
-          {pins
-            .filter((p) => rankOf.has(p.market))
-            .map((p) => {
-              const r = byId.get(p.market)!;
-              const town = p.label.split(",")[0];
-              const same = r[1].startsWith(town);
-              return (
-                <span key={p.market}>
-                  {" "}
-                  {same ? r[1] : `${town} (${r[1]})`} is <strong>#{rankOf.get(p.market)! + 1}</strong>.
-                </span>
-              );
-            })}
-        </p>
-      )}
-
-      <table className={`mt-6 w-full text-sm transition-opacity ${loading ? "opacity-40" : ""}`}>
-        <thead>
-          <tr className="border-b border-rule text-xs text-muted">
-            <th className="w-12 py-2 pr-3 text-right font-normal">#</th>
-            <th className="py-2 text-left font-normal">Place</th>
-            {COLS.map((c) => (
-              <th
-                key={c.key}
-                scope="col"
-                aria-sort={c.key === sort ? (c.key === "crowd" ? "ascending" : "descending") : "none"}
-                className={`py-2 pl-3 text-right font-normal ${c.key === sort || c.key === "adjusted" ? "" : "hidden sm:table-cell"}`}
-              >
-                <button
-                  type="button"
-                  title={c.title}
-                  onClick={() => setSort(c.key)}
-                  className={`hover:text-ink ${c.key === sort ? "font-semibold text-ink" : ""}`}
-                >
-                  {c.label}
-                  {c.key === sort ? (c.key === "crowd" ? " ↑" : " ↓") : ""}
-                </button>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {(list.length ? list : Array.from({ length: FIRST }, () => null)).map((item, i) => {
-            if (item === "gap")
-              return (
-                <tr key={`gap${i}`} aria-hidden>
-                  <td colSpan={6} className="py-1 pl-10 text-muted">
-                    ⋯
-                  </td>
-                </tr>
-              );
-            const r = item?.row ?? null;
-            if (!r)
-              return (
-                <tr key={i} className="border-b border-rule/60">
-                  <td colSpan={6} className="py-3">
-                    <span className="block h-4 w-56 rounded bg-rule/50" />
-                  </td>
-                </tr>
-              );
-            const mine = r[0] === query.market;
-            const pinned = pinIds.has(r[0]);
-            const tags = r[8].filter((t) => TAG_LABEL[t]).map((t) => TAG_LABEL[t]);
-            return (
-              <tr
-                key={r[0]}
-                className={`border-b border-rule/60 align-top ${mine ? "bg-accent-soft/60" : pinned ? "bg-rule/40" : ""}`}
-              >
-                <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-muted">{item!.rank}</td>
-                <td className="py-2">
-                  <button
-                    type="button"
-                    onClick={() => pick(r[0])}
-                    className={`text-left hover:underline ${mine ? "font-semibold text-accent" : pinned ? "font-semibold" : ""}`}
-                  >
-                    {r[1]}
-                  </button>
-                  {mine && <span className="ml-2 text-xs text-accent">you</span>}
-                  <div className="text-xs text-muted">
-                    {[kindOf(r), `${compact(r[6])} people`, ...tags].join(" · ")}
-                  </div>
-                </td>
-                {COLS.map((c) => (
-                  <td
-                    key={c.key}
-                    className={`py-2 pl-3 text-right tabular-nums ${
-                      c.key === sort ? "font-semibold" : c.key === "adjusted" ? "" : "hidden sm:table-cell"
-                    } ${c.key !== sort && c.key !== "adjusted" ? "text-muted" : ""}`}
-                  >
-                    {cell(c.key, r)}
-                    {c.key === sort && (
-                      <span className="ml-auto mt-1 block h-1 w-16 overflow-hidden rounded-full bg-rule/50">
-                        <span
-                          className="block h-full rounded-full bg-accent"
-                          style={{ width: `${Math.min(100, barShare(c.key, r, best) * 100)}%` }}
-                        />
-                      </span>
-                    )}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {ranked.length > shown && (
-        <div className="mt-3 flex gap-4 text-sm">
-          <button type="button" onClick={() => setShown(shown + MORE)} className="text-muted underline hover:text-ink">
-            Show {Math.min(MORE, ranked.length - shown)} more
-          </button>
-          <button type="button" onClick={() => setShown(ranked.length)} className="text-muted underline hover:text-ink">
-            Show all {fmt(ranked.length)}
-          </button>
-        </div>
-      )}
-      {shown > FIRST && (
-        <button type="button" onClick={() => setShown(FIRST)} className="mt-2 text-sm text-muted underline hover:text-ink">
-          Show fewer
-        </button>
-      )}
-
-      {rows.length ? (
-        <MetroChart
-          rows={rows}
-          topIds={topIds}
-          neighborIds={neighborIds}
-          pinIds={pinIds}
-          current={query.market}
-          onPick={pick}
-        />
-      ) : null}
-      <p className="mt-2 max-w-xl text-xs text-muted">
-        Each dot is a place. Across: your raw pool. Up: fewer competitors in the running per person in it (the market
-        alone, before how you stack up). Bigger and less crowded is up and to the right. Pool ÷ competitors is the
-        adjusted pool for someone of typical appeal, so dots on the same dashed diagonal tie on that; hover for your
-        own adjusted pool, which also counts how you compare with the competition there. Highlighted: you, the places
-        you&apos;re comparing, the five ranked on either side of you and the top five by {mode.by}. Click a dot to go
-        there.
-      </p>
-      <p className="mt-3 text-xs text-muted">
-        Same search everywhere ({noun(query.seek.sex)} {query.seek.lo}–{query.seek.hi}, same filters, same you).
-        Towns outside metro and micro areas are counted by county. Odds and crowding skip places with fewer than 50
-        people in your pool; rural counts rest on small samples.
-      </p>
-    </section>
-  );
-}
-
-function TownSearch({ onPick }: { onPick: (h: Hit) => void }) {
-  const [idx, setIdx] = useState<PlaceIndex | null>(null);
-  const [text, setText] = useState("");
-  const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
-  const hits = useMemo(() => (idx && text ? searchPlaces(idx, text, 6) : []), [idx, text]);
-
-  useEffect(() => {
-    if (open) loadPlaceIndex().then(setIdx);
-  }, [open]);
-
-  const pick = (h: Hit) => {
-    onPick(h);
-    setText("");
-    setActive(0);
-  };
-
-  return (
-    <span className="relative">
-      <input
-        type="search"
-        role="combobox"
-        aria-expanded={open && hits.length > 0}
-        aria-controls="town-list"
-        aria-label="Find a town to compare"
-        placeholder="Find a town…"
-        className="w-44 rounded-md border border-rule bg-card px-2 py-1 text-ink placeholder:text-muted"
-        value={text}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onChange={(e) => {
-          setText(e.target.value);
-          setActive(0);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowDown") setActive((a) => Math.min(a + 1, hits.length - 1));
-          else if (e.key === "ArrowUp") setActive((a) => Math.max(a - 1, 0));
-          else if (e.key === "Enter" && hits[active]) pick(hits[active]);
-          else if (e.key === "Escape") setText("");
-          else return;
-          e.preventDefault();
-        }}
-      />
-      {open && hits.length > 0 && (
-        <ul
-          id="town-list"
-          role="listbox"
-          className="absolute left-0 top-full z-20 mt-1 w-[min(20rem,88vw)] overflow-hidden rounded-lg border border-rule bg-card shadow-lg"
-        >
-          {hits.map((h, i) => (
-            <li
-              key={`${h.label}|${h.market}`}
-              role="option"
-              aria-selected={i === active}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                pick(h);
-              }}
-              onMouseEnter={() => setActive(i)}
-              className={`cursor-pointer px-3 py-2 ${i === active ? "bg-accent-soft" : ""}`}
-            >
-              <div className="text-ink">{h.label}</div>
-              <div className="text-xs text-muted">{h.sub}</div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </span>
-  );
+    if(!visible) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async ()=> {
+      setError('');
+      const parts:RankResponse[] = new Array(PARTS);
+      let next=0;
+      const run = async () => {
+        while(next<PARTS) {
+          const part=next++;
+          let response:RankResponse | undefined;
+          for(let attempt=0;attempt<2;attempt++) {
+            try {
+              const r = await fetch('/api/rank',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:rankKey,part}),signal:controller.signal});
+              if(!r.ok) { await r.arrayBuffer(); throw new Error('Ranking unavailable'); }
+              response=await r.json();
+              if(response!.artifactVersion !== ARTIFACT_VERSION || response!.part !== part || !Number.isInteger(response!.totalMarkets) || response!.totalMarkets<=0 || !Array.isArray(response!.all)) throw new Error('Incompatible ranking');
+              break;
+            } catch(e) { if(controller.signal.aborted || attempt===1) throw e; }
+          }
+          parts[part]=response!;
+        }
+      };
+      const lanes=[run(),run()];
+      try { await Promise.all(lanes); if(parts.some(p=>p.buildId!==parts[0].buildId || !p.buildId || p.totalMarkets!==parts[0].totalMarkets) || new Set(parts.flatMap(p=>p.all.map(r=>r.id))).size!==parts[0].totalMarkets) throw new Error('Mixed or incomplete snapshots'); if(!controller.signal.aborted) { setData({key:rankKey,rows:parts.flatMap(p=>p.all)}); setError(''); } }
+      catch { if(!controller.signal.aborted) { controller.abort(); await Promise.allSettled(lanes); setError('Nationwide comparison failed. No partial ranks are shown.'); } }
+    },350);
+    return ()=> { clearTimeout(timer); controller.abort(); };
+  },[rankKey,visible,retry]);
+  const loading = !data || data.key!==rankKey;
+  const rows = useMemo(() => (data?.rows ?? []).filter(r=>(!set || r.tags.includes(set)) && (!state || statesOf(r.name).includes(state))),[data,set,state]);
+  const zeroIndex=sort==='adjusted' && query.model.spark===0;
+  const ranked = useMemo(() => zeroIndex?[]:[...rows].filter(r=>value(sort,r)!==null).sort((a,b)=>sort==='crowd'?value(sort,a)!-value(sort,b)!:value(sort,b)!-value(sort,a)!),[rows,sort,zeroIndex]);
+  const states = [...new Set((data?.rows ?? []).flatMap(r=>statesOf(r.name)))].sort();
+  const mine = ranked.findIndex(r=>r.id===query.market);
+  const keep = new Set(ranked.slice(0,shown).map(r=>r.id));
+  if(mine>=0) ranked.slice(Math.max(0,mine-2),mine+3).forEach(r=>keep.add(r.id));
+  pins.forEach(p=>{ const i=ranked.findIndex(r=>r.id===p.market); if(i>=0) ranked.slice(Math.max(0,i-2),i+3).forEach(r=>keep.add(r.id)); });
+  const pick = (id:string)=> { onPick(id); window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'}); };
+  return <section ref={ref} aria-label="Other cities" className="mt-16 border-t border-rule pt-10">
+    <h2 className="font-display text-3xl">Compare places</h2>
+    <p className="mt-2 text-sm text-muted">A model comparison, not advice to move. Local networks, travel distance and dating outcomes are not measured.</p>
+    <div className="mt-4 flex flex-wrap gap-2">{MODES.map(m=><button type="button" key={m.key} aria-pressed={sort===m.key} onClick={()=>setSort(m.key)} className={`rounded-full border border-rule px-3 py-2 ${sort===m.key?'bg-ink text-paper':''}`}>{m.label}</button>)}</div>
+    <p className="mt-3 text-sm text-muted">{MODES.find(m=>m.key===sort)!.description}</p>
+    <div className="mt-4 flex flex-wrap gap-3">
+      <label>Place type <select className="field" value={set} onChange={e=>setSet(e.target.value)}><option value="">Everywhere</option>{SETS.map(s=><option key={s}>{s}</option>)}</select></label>
+      <label>State <select className="field" value={state} onChange={e=>setState(e.target.value)}><option value="">All</option>{states.map(s=><option key={s}>{s}</option>)}</select></label>
+      <PlaceSearch label="Find a town to compare" placeholder="Compare a town…" onPick={h=>setPins(p=>[...p.filter(x=>x.market!==h.market),{market:h.market,label:h.label}].slice(-6))} />
+    </div>
+    <div className="mt-3 flex flex-wrap gap-3">{pins.map(p=><span key={p.market}><button type="button" className="underline" onClick={()=>pick(p.market)}>{p.label}</button> <button type="button" aria-label={`Stop comparing ${p.label}`} onClick={()=>setPins(pins.filter(x=>x.market!==p.market))}>×</button></span>)}</div>
+    <p role="status" className="mt-4">{error || (loading ? 'Loading all eight nationwide partitions…' : mine>=0 ? `Selected place: #${mine+1} of ${ranked.length} supported places in view.` : `${ranked.length} supported places in view. Selected place has no supported rank here.`)}</p>
+    {error && <button type="button" className="underline" onClick={()=>{setError('');setRetry(retry+1);}}>Retry comparison</button>}
+    {!loading && !error && <>
+      {ranked.length ? <div className="overflow-x-auto"><table className="mt-4 w-full text-sm"><caption className="sr-only">Comparison by {MODES.find(m=>m.key===sort)!.label}</caption><thead><tr><th scope="col">Rank</th><th scope="col">Area</th>{MODES.map(m=><th scope="col" key={m.key} aria-sort={sort===m.key?(sort==='crowd'?'ascending':'descending'):'none'}><button type="button" onClick={()=>setSort(m.key)}>{m.label}</button></th>)}</tr></thead>
+      <tbody>{ranked.map((r,i)=>keep.has(r.id)?<tr key={r.id} className={`border-b border-rule ${r.id===query.market?'bg-accent-soft':''}`}><td className="p-2">{i+1}</td><th scope="row" className="p-2 text-left font-normal"><button type="button" className="underline" onClick={()=>pick(r.id)}>{r.name}</button>{r.status==='thin' && <span className="block text-xs">Thin effective support—rank may be unstable</span>}</th>{MODES.map(m=><td key={m.key} className="p-2 text-right tabular-nums">{cell(m.key,r)}</td>)}</tr>:null)}</tbody></table></div>:<p className="mt-4">{zeroIndex?'Spark is zero, so index values have no meaningful ordering. Choose Estimated pool or Model multiplier.':'No supported results match this view. Change the place type, state, or ranking measure.'}</p>}
+      {shown<ranked.length && <button type="button" className="mt-3 underline" onClick={()=>setShown(shown+25)}>Show more</button>}
+      {shown>10 && <button type="button" className="ml-3 underline" onClick={()=>setShown(10)}>Show fewer</button>}
+      <MetroChart rows={rows} topIds={new Set(ranked.slice(0,5).map(r=>r.id))} neighborIds={new Set()} pinIds={new Set(pins.map(p=>p.market))} current={query.market} onPick={pick} />
+    </>}
+    <p className="mt-3 text-xs text-muted">Indices and crowding unavailable below 50 estimated people or outside validated model support. All comparisons use the same filters. Approximate support does not establish rank precision.</p>
+  </section>;
 }

@@ -31,7 +31,7 @@ function AgeSelect({ value, onChange, label }: { value: number; onChange: (n: nu
 function MyAgeSelect({ value, onChange }: { value: number | undefined; onChange: (n: number | undefined) => void }) {
   return (
     <select
-      className={`field ${value === undefined ? "opacity-60" : ""}`}
+      className="field"
       aria-label="Your age (optional)"
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value === "" ? undefined : +e.target.value)}
@@ -133,26 +133,7 @@ function SexSelect({ value, onChange, label, article }: { value: Sex; onChange: 
   );
 }
 
-const heights = Array.from({ length: 31 }, (_, i) => i + 56); // 4'8" to 7'2"
 const ft = (h: number) => `${Math.floor(h / 12)}′${h % 12}″`;
-
-function HeightSelect({ value, onChange }: { value: number | undefined; onChange: (h: number | undefined) => void }) {
-  return (
-    <select
-      className={`field ${value === undefined ? "opacity-60" : ""}`}
-      aria-label="Your height (optional)"
-      value={value ?? ""}
-      onChange={(e) => onChange(e.target.value === "" ? undefined : +e.target.value)}
-    >
-      <option value="">height?</option>
-      {heights.map((h) => (
-        <option key={h} value={h}>
-          {ft(h)}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 function Chip({
   on,
@@ -196,21 +177,21 @@ export default function QueryForm({
 
   return (
     <section aria-label="Your search">
-      <p className="font-display text-2xl leading-[1.7] sm:text-[1.7rem]">
+      <div className="font-display text-2xl leading-[1.7] sm:text-[1.7rem]">
         I&apos;m a <MyAgeSelect value={query.me.age} onChange={(age) => set({ me: { ...query.me, age } })} />
         {query.me.age !== undefined ? "-year-old " : " "}
         <SexSelect label="Your sex" article value={query.me.sex} onChange={(sex) => set({ me: { ...query.me, sex } })} />
-        {query.you.height !== undefined ? ", " : " "}
-        <HeightSelect value={query.you.height} onChange={(height) => set({ you: { ...query.you, height } })} />
-        {query.you.height !== undefined ? " tall," : ""} in{" "}
+        {" "}in{" "}
         <CityPicker marketName={marketName} onPick={(market) => set({ market })} /> looking for{" "}
         <SexSelect label="Who you're looking for" value={query.seek.sex} onChange={(sex) => set({ seek: { ...query.seek, sex } })} /> aged{" "}
         <AgeSelect label="Youngest" value={query.seek.lo} onChange={(lo) => set({ seek: { ...query.seek, lo, hi: Math.max(lo, query.seek.hi) } })} />
         {" to "}
         <AgeSelect label="Oldest" value={query.seek.hi} onChange={(hi) => set({ seek: { ...query.seek, hi, lo: Math.min(hi, query.seek.lo) } })} />.
-      </p>
+      </div>
 
-      <div className="mt-6 flex flex-wrap items-center gap-2">
+      <details className="mt-6">
+      <summary className="cursor-pointer text-sm">Partner preferences (expand to edit)</summary>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         <span className="mr-1 text-sm text-muted">Must be:</span>
         <Chip on={f.neverMarried} onClick={() => set({ filters: { ...f, neverMarried: !f.neverMarried } })}>
           never married
@@ -409,6 +390,7 @@ export default function QueryForm({
       </div>
 
 
+      </details>
       <details className="group mt-4 text-sm">
         <summary className="cursor-pointer select-none text-muted hover:text-ink">
           Adjust the assumptions
@@ -435,15 +417,18 @@ export default function QueryForm({
           <label className="flex flex-col gap-1 sm:col-span-2">
             <span>
               Mutual spark:{" "}
-              <strong>{m.spark > 0 ? `${Math.round(m.spark * 100)}% of them` : "off"}</strong>{" "}
+              <strong>{m.spark !== null ? `${Math.round(m.spark * 100)}% of them` : "off"}</strong>{" "}
               <span className="text-muted">(Backus used 5%)</span>
             </span>
+            <label><input type="checkbox" checked={m.spark !== null} onChange={() => set({ model: { ...m, spark: m.spark === null ? .05 : null } })} /> Enable spark scenario</label>
             <input
               type="range"
+              aria-label="Mutual spark probability"
+              disabled={m.spark === null}
               min={0}
-              max={50}
+              max={100}
               step={1}
-              value={Math.round(m.spark * 100)}
+              value={Math.round((m.spark ?? .05) * 100)}
               className="accent-[var(--accent)]"
               onChange={(e) => set({ model: { ...m, spark: +e.target.value / 100 } })}
             />

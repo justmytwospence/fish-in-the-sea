@@ -1,198 +1,128 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Choice } from "@/lib/competition";
-import { compute, LOW_RECORDS, mergeContext, noun, type Global, type Query, type Result, type Shard } from "@/lib/model";
-import { approx, shortCity } from "@/lib/format";
-import { parseQuery, serializeQuery } from "@/lib/query";
-import QueryForm from "./QueryForm";
-import Sieve from "./Sieve";
-import Receipts from "./Receipts";
-import Verdict from "./Verdict";
-import WhoIsLeft from "./WhoIsLeft";
-import WhatIfs from "./WhatIfs";
-import { whatIfs } from "@/lib/whatif";
-import { overTime, type AgePoint } from "@/lib/overtime";
-import OverTime from "./OverTime";
-import Competition from "./Competition";
-import Leaderboard from "./Leaderboard";
-import Method from "./Method";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { LOW_RECORDS, noun, type Query, type Result } from '@/lib/model';
+import { approx, shortCity } from '@/lib/format';
+import { serializeQuery } from '@/lib/query';
+import QueryForm from './QueryForm';
+import SearchActions from './SearchActions';
+import Sieve from './Sieve';
+import Receipts from './Receipts';
+import Verdict from './Verdict';
+import WhoIsLeft from './WhoIsLeft';
+import WhatIfs from './WhatIfs';
+import type { whatIfs } from '@/lib/whatif';
+import type { AgePoint } from '@/lib/overtime';
+import type { Sensitivity } from '@/lib/sensitivity';
+import OverTime from './OverTime';
+import Competition, {PersonalProfile} from './Competition';
+import Leaderboard from './Leaderboard';
+import Method from './Method';
 
-const STORAGE_KEY = "fish-in-the-sea:search";
-const OLD_STORAGE_KEY = "the-denominator:search"; // before the rename
-
-const shardCache = new Map<string, Promise<Shard>>();
-let staticPromise: Promise<[Global, Choice]> | undefined;
-
-function fetchShard(id: string) {
-  let p = shardCache.get(id);
-  if (!p) {
-    p = fetch(`/data/m/${id}.json`).then((r) => {
-      if (!r.ok) throw new Error(`no data for ${id}`);
-      return r.json();
-    });
-    shardCache.set(id, p);
-  }
-  return p;
-}
-
-function LocateLine({ located, onMarket }: { located: string | null; onMarket: (id: string) => void }) {
-  const [state, setState] = useState<"idle" | "busy" | "failed" | "done">("idle");
-  const [place, setPlace] = useState<string | null>(null);
-  const locate = () => {
-    if (!navigator.geolocation) return setState("failed");
-    setState("busy");
-    navigator.geolocation.getCurrentPosition(
-      async ({ coords }) => {
-        // Round to about a kilometer before it leaves the browser.
-        const r = await fetch(`/api/locate?lat=${coords.latitude.toFixed(2)}&lon=${coords.longitude.toFixed(2)}`);
-        if (!r.ok) return setState("failed");
-        const hit = (await r.json()) as { market: string; place: string };
-        setPlace(hit.place);
-        onMarket(hit.market);
-        setState("done");
-      },
-      () => setState("failed"),
-      { maximumAge: 600_000, timeout: 10_000 },
-    );
-  };
-  return (
-    <p className="mt-3 text-xs text-muted">
-      {state === "done" && place ? (
-        <>Located you near {place}.</>
-      ) : located ? (
-        <>Guessed from your connection: {located}. </>
-      ) : null}
-      {state !== "done" && (
-        <button type="button" onClick={locate} className="underline hover:text-ink" disabled={state === "busy"}>
-          {state === "busy" ? "Locating…" : state === "failed" ? "Couldn't locate you; try again" : "Use my precise location"}
-        </button>
-      )}
-    </p>
-  );
-}
-
-export default function App({
-  initialQuery,
-  initialResult,
-  dataYear,
-  located,
-}: {
-  initialQuery: Query;
-  initialResult: Result;
-  dataYear: string;
-  located: string | null;
+type Details = { loosen: ReturnType<typeof whatIfs>; timeline: { sliding: AgePoint[]; fixed: AgePoint[] }; sensitivity:Sensitivity[] };
+export default function App({ initialQuery, initialResult, dataYear, located }: {
+  initialQuery: Query; initialResult: Result; dataYear: string; located: string | null;
 }) {
   const [query, setQuery] = useState(initialQuery);
-  const [result, setResult] = useState(initialResult);
-  const [data, setData] = useState<[Global, Choice] | null>(null);
-  const [loosen, setLoosen] = useState<ReturnType<typeof whatIfs> | null>(null);
-  const [timeline, setTimeline] = useState<{ sliding: AgePoint[]; fixed: AgePoint[] } | null>(null);
-  const reqId = useRef(0);
+  const [committed, setCommitted] = useState({ query: initialQuery, result: initialResult });
+  const [status, setStatus] = useState('');
+  const [calculationReady,setCalculationReady]=useState(false);
+  const [details, setDetails] = useState<Details | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [locateState, setLocateState] = useState('');
+  const worker = useRef<Worker | null>(null);
+  const seq = useRef(0);
   const qs = useMemo(() => serializeQuery(query), [query]);
-
-  // Remember your search in this browser. A link that carries a search wins;
-  // a bare visit restores the last one. Storage can be unavailable (private
-  // windows, blocked site data), so every access is guarded.
-  const canSave = useRef(false);
-  useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
-    const fromLink = p.has("in") || p.has("me") || p.has("seek");
-    let saved: string | null = null;
-    try {
-      saved = fromLink
-        ? null
-        : (window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(OLD_STORAGE_KEY));
-    } catch {}
-    if (saved) {
-      Promise.resolve().then(() => {
-        canSave.current = true;
-        setQuery(parseQuery(new URLSearchParams(saved)));
-      });
-    } else canSave.current = true;
-  }, []);
+  const stale = serializeQuery(committed.query) !== qs;
 
   useEffect(() => {
-    (staticPromise ??= Promise.all([
-      Promise.all([
-        fetch("/data/global.json").then((r) => r.json()),
-        fetch("/data/context.json").then((r) => r.json()),
-        fetch("/data/religion.json").then((r) => r.json()),
-        fetch("/data/politics.json").then((r) => r.json()),
-        fetch("/data/kids.json").then((r) => r.json()),
-        fetch("/data/beliefs.json").then((r) => r.json()),
-      ]).then(([g, c, r, p, k, b]) => mergeContext(g, c, r, p, k, b)),
-      fetch("/data/choice.json").then((r) => r.json()),
-    ])).then(setData);
-  }, []);
-
+    const w = new Worker(new URL('../lib/calculator.worker.ts', import.meta.url));
+    worker.current = w;
+    w.onerror = () => setStatus('Calculation worker failed. Reload to retry.');
+    return () => { w.terminate(); worker.current = null; };
+  }, [retry]);
   useEffect(() => {
-    window.history.replaceState(null, "", `?${qs}`);
-    if (canSave.current) {
+    const w = worker.current;
+    if (!w) return;
+    const id = ++seq.current;
+    // Explicitly opened shared searches are read once; edits never publish
+    // new sensitive settings into history.
+    if (qs !== serializeQuery(initialQuery)) window.history.replaceState(null, '', window.location.pathname);
+    w.onmessage = (event) => {
+      if (event.data.id !== seq.current) return;
+      if (event.data.error) { setStatus(event.data.error); return; }
+      if (event.data.kind === 'result') {
+        setCommitted({ query, result: event.data.result });
+        setCalculationReady(true);
+        setDetails(null);
+        setStatus('');
+        if (showDetails && !event.data.result.issues.length) w.postMessage({ id, query, kind:'details' });
+      } else { setDetails(event.data); setStatus(''); }
+    };
+    const timer=setTimeout(()=>w.postMessage({ id, query, kind:'result' }),120);
+    return ()=>clearTimeout(timer);
+  }, [qs, query, retry, showDetails, initialQuery]);
+  const { result, query: displayed } = committed;
+  const thin = result.effectiveSupport < LOW_RECORDS;
+  const issue = !stale && result.issues.length > 0;
+  const update = (q: Query) => { setCalculationReady(false); setStatus('Updating…'); setQuery(q); };
+  const locate = () => {
+    if (!navigator.geolocation) return setLocateState('Location is unavailable. Search for a town instead.');
+    setLocateState('Locating…');
+    navigator.geolocation.getCurrentPosition(async ({ coords }) => {
       try {
-        window.localStorage.setItem(STORAGE_KEY, qs);
-      } catch {}
-    }
-    if (!data) return;
-    const id = ++reqId.current;
-    fetchShard(query.market)
-      .then((s) => {
-        if (id !== reqId.current) return;
-        setResult(compute(s, data[0], query, data[1]));
-        setLoosen(whatIfs(s, data[0], query, data[1]));
-        setTimeline({
-          sliding: overTime(s, data[0], query, data[1], true),
-          fixed: overTime(s, data[0], query, data[1], false),
-        });
-      })
-      .catch(() => {});
-  }, [query, qs, data]);
-
-  useEffect(() => {
-    document.title = `${approx(result.final.value)} ${noun(query.seek.sex)} ${query.seek.lo}–${query.seek.hi} in ${shortCity(result.market.name)} · Fish in the Sea`;
-  }, [result, query.seek]);
-
-  // Replay the sieve only when the funnel itself changes, not when you edit
-  // your own attributes in the competition section.
-  const sieveKey = useMemo(() => {
-    const { you: _you, me, ...rest } = query;
-    void _you;
-    return JSON.stringify({ ...rest, sex: me.sex });
-  }, [query]);
-
-  return (
-    <main className="mx-auto max-w-3xl px-4 pb-24 pt-10 sm:px-6 sm:pt-16">
-      <header className="mb-10">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Fish in the Sea</p>
-        <h1 className="mt-3 font-display text-4xl leading-[1.05] tracking-tight sm:text-5xl">
-          How many people could you actually date?
-        </h1>
-        <p className="mt-4 max-w-xl text-muted">
-          Pour everyone in your metro into the sieve. Shake out the Census, then a few survey-based facts of life. See
-          who&apos;s left.
-        </p>
-      </header>
-
-      <QueryForm query={query} marketName={result.market.name} onChange={setQuery} />
-      <LocateLine located={located} onMarket={(market) => setQuery((q) => ({ ...q, market }))} />
-      <Sieve key={sieveKey} steps={result.steps} thin={result.records < LOW_RECORDS} />
-      <Receipts steps={result.steps} thin={result.records < LOW_RECORDS} records={result.records} />
-      <Verdict result={result} query={query} />
-      <WhoIsLeft result={result} query={query} dataYear={dataYear} />
-      <Competition result={result} query={query} onYou={(you) => setQuery((q) => ({ ...q, you }))} />
-      {loosen && loosen.options.length > 0 && (
-        <WhatIfs base={loosen.base} options={loosen.options} onApply={(q) => setQuery(q)} />
-      )}
-      {timeline && query.me.age !== undefined && timeline.sliding.length > 0 ? (
-        <OverTime sliding={timeline.sliding} fixed={timeline.fixed} query={query} />
-      ) : (
-        <section aria-label="Over time" className="mt-16 border-t border-rule pt-10">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Over time</p>
-          <p className="mt-3 max-w-xl text-muted">Add your age at the top to see how your prospects change as you get older.</p>
-        </section>
-      )}
-      <Leaderboard qs={qs} query={query} onPick={(market) => setQuery((q) => ({ ...q, market }))} />
-      <Method dataYear={dataYear} />
-    </main>
-  );
+        const r = await fetch(`/api/locate?lat=${coords.latitude.toFixed(2)}&lon=${coords.longitude.toFixed(2)}`);
+        if (!r.ok) throw new Error();
+        const hit = await r.json();
+        update({ ...query, market: hit.market }); setLocateState(`Near ${hit.place}.`);
+      } catch { setLocateState('Could not locate you. Retry or search for a town.'); }
+    }, () => setLocateState('Location permission unavailable. Search for a town instead.'), { maximumAge:600000, timeout:10000 });
+  };
+  return <main data-calculation-ready={calculationReady && !stale} className="mx-auto max-w-3xl px-4 pb-24 pt-10 sm:px-6 sm:pt-16">
+    <header className="mb-8"><p className="text-xs font-semibold uppercase tracking-widest text-muted">Fish in the Sea</p>
+      <h1 className="mt-3 font-display text-4xl sm:text-5xl">Explore your dating market.</h1>
+      <p className="mt-4 text-muted">Population estimates and an observed-pairing competition model—not a prediction of who will date you.</p>
+    </header>
+    <QueryForm query={query} marketName={result.market.name} onChange={update} />
+    <PersonalProfile query={query} onYou={you=>update({...query,you})}/>
+    <SearchActions query={query} onLoad={update} />
+    <p className="mt-3 text-xs text-muted">{locateState || (located ? `Connection-based guess: ${located}. ` : '')} <button type="button" className="underline" onClick={locate}>Use my location (coordinates rounded before sending)</button></p>
+    <div role="status" className="mt-4">{status}{stale && ' Previous results below are for the previous search.'}
+      {status.includes('failed') && <button type="button" className="ml-3 underline" onClick={() => { setStatus('Retrying…'); setRetry(retry+1); }}>Retry</button>}
+    </div>
+    {issue ? <section className="mt-6 rounded border border-rule p-4" role="alert" aria-label="Unsupported search">
+      {result.issues.map((text) => <p key={text}>{text}</p>)}
+      <button type="button" className="mr-4 underline" onClick={() => update({ ...query, seek: { ...query.seek, lo: Math.min(49,query.seek.lo), hi:49 } })}>Limit ages to 49</button>
+      <button type="button" className="underline" onClick={() => update({ ...query, filters: { ...query.filters, wantKids:[] } })}>Remove kids-someday filter</button>
+    </section> : <div aria-busy={stale} className={stale ? 'opacity-50' : ''}>
+      <section className="mt-6 rounded-xl border border-rule bg-card p-5" aria-label="Search summary">
+        <p className="text-xs text-muted">Estimated pre-spark pool · ages {displayed.seek.lo}–{displayed.seek.hi} · {result.market.name} ({result.market.kind === 'rural' ? 'county boundary' : 'Census statistical area, not city limits'})</p>
+        <p className="mt-2 font-display text-4xl">≈{approx(result.demographicPool)} {noun(displayed.seek.sex)}</p>
+        {displayed.model.spark !== null && <p className="mt-2 text-sm">Optional spark scenario pool: {approx(result.scenarioPool)} (user assumption {Math.round(displayed.model.spark*100)}%)</p>}
+        <p className="mt-2 text-sm text-muted">{result.competition ? `Competition-adjusted index: ${approx(result.competition.adjusted)} · model multiplier ×${result.competition.multiplier.toFixed(2)}` : 'Competition unavailable: validation/age support or fewer than 50 estimated targets or competitors.'}</p>
+        {displayed.seek.hi===90 && <p className="mt-2 text-sm text-muted">The upper age of 90 represents 90+ in this model.</p>}
+        <p className="mt-2 text-xs text-muted">{dataYear}. Estimates are conditional on model assumptions, not actual reachable people.</p>
+        {thin && <p className="mt-2 text-sm text-muted">Low effective weighted support. This estimate borrows regional information; magnitude and direction are uncertain.</p>}
+        {result.demographicPool<1 && <p className="mt-2 text-sm">Estimate below one person. Try loosening partner preferences or resetting the search; this is not evidence that no compatible people exist.</p>}
+      </section>
+      <Competition result={result} query={displayed} />
+      <details className="mt-8"><summary className="cursor-pointer">Explain the estimate: sieve and sources</summary>
+        <Sieve key={JSON.stringify(result.steps.map(s => [s.key,s.value]))} steps={result.steps} thin={thin} />
+        <Receipts steps={result.steps} thin={thin} effectiveSupport={result.effectiveSupport} />
+      </details>
+      <Verdict result={result} query={displayed} />
+      <WhoIsLeft result={result} query={displayed} dataYear={dataYear} />
+      <section className="mt-10"><button type="button" className="underline" disabled={stale} onClick={() => setShowDetails(!showDetails)}>{showDetails ? 'Hide scenarios' : 'Explore filter and age scenarios'}</button></section>
+      {showDetails && !details && <p role="status">{status.includes('failed')?'Scenarios unavailable; retry above.':'Calculating scenarios…'}</p>}
+      {showDetails && details && <>
+        <WhatIfs base={details.loosen.base} options={details.loosen.options} onApply={update} />
+        {displayed.me.age !== undefined && details.timeline.sliding.length > 0 && details.timeline.fixed.length > 0 ? <OverTime sliding={details.timeline.sliding} fixed={details.timeline.fixed} query={displayed} /> : <p className="mt-6 text-muted">Age scenarios require a profile age and supported competition estimates throughout the range.</p>}
+        <section className="mt-10" aria-label="Model sensitivity"><h2 className="font-display text-2xl">Model sensitivity</h2><p className="mt-2 text-muted">Remove one assumed association at a time, without refitting. Large changes indicate unstable conclusions. This does not measure rank confidence.</p><ul className="mt-3">{details.sensitivity.map(s=><li key={s.label} className="border-b border-rule py-2">{s.label}: {s.index===null?'unavailable':`${approx(s.index)} index units · ×${s.multiplier!.toFixed(2)}`}</li>)}</ul></section>
+      </>}
+    </div>}
+    {!issue && <Leaderboard qs={qs} query={query} onPick={(market) => update({ ...query, market })} />}
+    <Method dataYear={dataYear} />
+    <p className="mt-6 text-xs text-muted">Selected area: {shortCity(result.market.name)}. This app records Census sex, not gender identity.</p>
+  </main>;
 }

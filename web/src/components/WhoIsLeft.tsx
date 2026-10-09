@@ -100,7 +100,7 @@ function AgeHistogram({ lo, ages }: { lo: number; ages: number[] }) {
         {ages.map((v, i) => {
           const h = (v / max) * H;
           return (
-            <g key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+            <g key={i} onPointerDown={() => setHover(i)} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
               <rect x={i * bw} y={0} width={bw} height={H} fill="transparent" />
               <rect
                 x={i * bw + 1}
@@ -114,12 +114,13 @@ function AgeHistogram({ lo, ages }: { lo: number; ages: number[] }) {
           );
         })}
         <line x1={0} x2={W} y1={H} y2={H} className="stroke-rule" />
-        {[0, Math.floor((ages.length - 1) / 2), ages.length - 1].map((i) => (
+        {[...new Set([0, Math.floor((ages.length - 1) / 2), ages.length - 1])].map((i) => (
           <text key={i} x={i * bw + bw / 2} y={H + 13} textAnchor="middle" className="fill-muted text-[10px]">
             {lo + i}
           </text>
         ))}
       </svg>
+      <details className="mt-2 text-xs"><summary className="cursor-pointer">Age values as a table</summary><table className="mt-2 w-full"><caption className="sr-only">Estimated pre-spark pool by age</caption><thead><tr><th scope="col">Age</th><th scope="col">Estimated count</th><th scope="col">Share</th></tr></thead><tbody>{ages.map((v,i)=><tr key={i}><th scope="row">{lo+i===90?'90+':lo+i}</th><td className="text-center">{fmt(v)}</td><td className="text-center">{pct(v/total)}</td></tr>)}</tbody></table></details>
     </div>
   );
 }
@@ -192,7 +193,7 @@ export default function WhoIsLeft({ result, query, dataYear }: { result: Result;
             <div>
               <dt className="text-muted">2024 presidential vote</dt>
               <dd className="font-display text-xl">
-                {ctx.dem !== undefined ? (
+                {ctx.dem != null ? (
                   <>
                     {pct(ctx.dem)} D · {pct(1 - ctx.dem)} R
                   </>
@@ -208,14 +209,14 @@ export default function WhoIsLeft({ result, query, dataYear }: { result: Result;
               <dt className="text-muted">Adults who smoke</dt>
               <dd className="font-display text-xl">{pct(ctx.localSmoke)}</dd>
               <dd className="text-xs text-muted">
-                {ctx.src === "metro" ? "This metro" : "State rate"}, 2024 BRFSS (US 11.5%)
+                {ctx.src === 'metro' ? 'Metro/division adjustment' : ctx.src === 'state' ? 'State fallback' : 'US fallback'}, BRFSS {ctx.sourceYear ?? 'vintage unavailable'}
               </dd>
             </div>
             <div>
               <dt className="text-muted">Adults with obesity</dt>
               <dd className="font-display text-xl">{pct(ctx.localObese)}</dd>
               <dd className="text-xs text-muted">
-                {ctx.src === "metro" ? "This metro" : "State rate"}, 2024 BRFSS, self-reported (US 34.3%)
+                {ctx.src === 'metro' ? 'Metro/division adjustment' : ctx.src === 'state' ? 'State fallback' : 'US fallback'}, BRFSS {ctx.sourceYear ?? 'vintage unavailable'}, self-reported
               </dd>
             </div>
           </dl>

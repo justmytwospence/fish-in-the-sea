@@ -39,11 +39,11 @@ export default function Verdict({ result, query }: { result: Result; query: Quer
         {n >= 1 ? fmt(n) : n > 0 ? "less than one" : "zero"}
       </p>
       <p className="mt-3 text-lg">
-        {who} aged {query.seek.lo}–{query.seek.hi} in the {city} area who might, in theory, date you.
+        Estimated {who} aged {query.seek.lo}–{query.seek.hi} in the {city} statistical area who pass the enabled filters. Not a count of reachable or mutually interested partners.
       </p>
-      {result.final.moe > 0 && n >= 10 && (
+      {result.final.kind === 'census' && result.final.moe > 0 && n >= 10 && (
         <p className="mt-1 text-sm text-muted">
-          Sampling range {fmt(lo)}–{fmt(hi)}. The survey-based steps are rougher than that.
+          Approximate ACS-only sampling range {fmt(lo)}–{fmt(hi)}. Model and allocation uncertainty are excluded.
         </p>
       )}
 

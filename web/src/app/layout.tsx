@@ -12,7 +12,7 @@ const fraunces = Fraunces({
 export const metadata: Metadata = {
   title: "Fish in the Sea",
   description:
-    "How many people could you actually date? A Census-based estimate for every US metro, one sobering step at a time.",
+    "Explore Census-based population estimates and qualified competition comparisons—not dating predictions.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

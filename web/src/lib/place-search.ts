@@ -7,7 +7,10 @@ export interface PlaceIndex {
 }
 
 let indexPromise: Promise<PlaceIndex> | undefined;
-export const loadPlaceIndex = () => (indexPromise ??= fetch("/data/markets.json").then((r) => r.json()));
+export const loadPlaceIndex = () => (indexPromise ??= fetch('/data/markets.json').then((r) => {
+  if (!r.ok) throw new Error('Places unavailable');
+  return r.json();
+}).catch((e) => { indexPromise = undefined; throw e; }));
 
 const ALIASES: Record<string, string> = {
   nyc: "new york",

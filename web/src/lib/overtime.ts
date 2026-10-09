@@ -29,7 +29,8 @@ export function overTime(s: Shard, g: Global, q: Query, choice: Choice, slide = 
     const hi = Math.min(MAX_AGE, q.seek.hi + shift);
     if (lo > hi) continue;
     const r = compute(s, g, { ...q, me: { ...q.me, age }, seek: { ...q.seek, lo, hi } }, choice, false);
-    out.push({ age, lo, hi, raw: r.final.value, adjusted: r.competition?.adjusted ?? r.final.value });
+    if (!r.competition || r.issues.length) return [];
+    out.push({ age, lo, hi, raw: r.final.value, adjusted: r.competition.adjusted });
   }
   return out;
 }

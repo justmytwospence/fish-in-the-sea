@@ -13,7 +13,7 @@ const KIND: Record<StepKind, { tag: string; title: string }> = {
 
 // Every step of the sieve, each with its own small expander for the source,
 // method and margin of error.
-export default function Receipts({ steps, thin = false, records = 0 }: { steps: Step[]; thin?: boolean; records?: number }) {
+export default function Receipts({ steps, thin = false, effectiveSupport = 0 }: { steps: Step[]; thin?: boolean; effectiveSupport?: number }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (key: string) =>
     setOpen((o) => {
@@ -26,8 +26,7 @@ export default function Receipts({ steps, thin = false, records = 0 }: { steps: 
     <section aria-label="Every step" className="mt-6">
       {thin && (
         <p className="mt-3 rounded-md border border-accent/40 bg-accent-soft/40 p-3 text-sm">
-          Only about {Math.max(1, Math.round(records))} survey records in this metro match every Census filter you&apos;ve
-          stacked, so the microdata steps lean on regional rates. The direction is right; the exact number is rough.
+          Approximate effective microdata support: {Math.round(effectiveSupport)} (not a local respondent count). Sparse areas borrow regional information. Both the magnitude and direction can be uncertain.
         </p>
       )}
       <table className="mt-3 w-full text-sm">
@@ -72,7 +71,7 @@ export default function Receipts({ steps, thin = false, records = 0 }: { steps: 
                     </span>
                     {thin && s.kind === "microdata" && (
                       <span
-                        title="Few survey records behind this step here, so the estimate leans on regional rates. Treat it as rough."
+                        title="Low effective weighted support: estimates borrow regional information. This is not a count of local respondents."
                         className="ml-1 rounded border border-accent px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-accent"
                       >
                         thin data
@@ -88,10 +87,10 @@ export default function Receipts({ steps, thin = false, records = 0 }: { steps: 
                   <tr id={`step-${s.key}`} className="border-b border-rule/60 bg-rule/10">
                     <td colSpan={3} className="py-3 pl-6 pr-2 text-muted">
                       <p className="text-ink">{s.note}</p>
-                      {s.moe > 0 && (
+                      {s.moe > 0 && s.kind === 'census' && (
                         <p className="mt-1">
-                          90% range from sampling error: {fmt(Math.max(0, s.value - s.moe))} to {fmt(s.value + s.moe)}
-                          {modeled && " (the survey assumption itself adds more uncertainty)"}.
+                          Approximate ACS-only sampling range (excludes model and geographic allocation uncertainty): {fmt(Math.max(0, s.value - s.moe))} to {fmt(s.value + s.moe)}
+                          .
                         </p>
                       )}
                       <ul className="mt-1">

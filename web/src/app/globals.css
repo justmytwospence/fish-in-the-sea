@@ -6,12 +6,12 @@
   --ink: #1d1a16;
   --muted: #6d665b;
   --rule: #ddd4c4;
-  --accent: #c8412a;
+  --accent: #b02d1d;
   --accent-soft: #f0d2c7;
   --census: #2b2722;
-  --model: #c8412a;
+  --model: #b02d1d;
   --cool: #1f6fb2;
-  --warm: #c8412a;
+  --warm: #b02d1d;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +45,11 @@
   --font-display: var(--font-fraunces);
 }
 
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
 body {
   background: var(--paper);
   color: var(--ink);
@@ -70,7 +75,10 @@ body {
 }
 .field:focus-visible {
   background: var(--accent-soft);
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
 }
+input::placeholder { color: var(--muted); opacity: 1; }
 
 select.field {
   appearance: none;
@@ -103,8 +111,8 @@ a:hover {
 .dual-range input[type="range"]::-webkit-slider-thumb {
   pointer-events: auto;
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   border-radius: 9999px;
   background: var(--accent);
   border: 2px solid var(--card);
@@ -113,8 +121,8 @@ a:hover {
 }
 .dual-range input[type="range"]::-moz-range-thumb {
   pointer-events: auto;
-  width: 14px;
-  height: 14px;
+  width: 24px;
+  height: 24px;
   border-radius: 9999px;
   background: var(--accent);
   border: 2px solid var(--card);

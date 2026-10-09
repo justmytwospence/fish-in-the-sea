@@ -8,6 +8,7 @@ import {
   type Source,
 } from "./assumptions";
 import { compete, type Choice, type Competition, type You } from "./competition";
+import { jointMargins } from "./distribution";
 import { NPOL, NRACE, NREL, NTYPE, NWANT, PARTY_PLURAL, RACES, RELIGIONS, WANT_KIDS, typeIndex, type Typed } from "./types";
 
 export type Marg = "nm" | "sep" | "wid" | "div" | "mar";
@@ -51,12 +52,13 @@ export interface HealthNational {
 
 export interface MarketCtx {
   src: "metro" | "state" | "us";
+  sourceYear?: number;
   smoke: number; // log-odds shift vs. the US
   obese: number;
   over: number;
   localSmoke: number; // all-adult prevalence, for display
   localObese: number;
-  dem?: number; // 2024 two-party Democratic share
+  dem?: number | null; // 2024 two-party Democratic share
   votes?: number;
 }
 
@@ -106,12 +108,14 @@ export interface Query {
     orientation: boolean;
     relationship: boolean;
     looking: boolean;
-    spark: number; // Backus-style mutual attraction, 0 = off
+    spark: number | null; // null = disabled; explicit zero is a zero-probability scenario
   };
   you: You;
 }
 
 export type StepKind = "census" | "microdata" | "survey" | "dial";
+// Single presentation contract. Receipts and the sieve consume these computed steps.
+export const FUNNEL_ORDER = ['pop','sex','age','unmarried','partner','nm','edu','kids','parents','income','race','height','smoke','religion','politics','wantKids','bmi','orientation','relationship','looking','spark'] as const;
 
 export interface Step {
   key: string;
@@ -149,7 +153,10 @@ export interface Result {
   final: Step;
   competition: Competition | null;
   composition: Composition;
-  records: number; // approx. survey records behind the microdata steps
+  effectiveSupport: number; // approximate Kish support, not a respondent count
+  demographicPool: number;
+  scenarioPool: number;
+  issues: string[];
   ctx: MarketCtx | null;
 }
 
@@ -180,7 +187,8 @@ export interface PoliticsData {
 // Shape of kids.json (see pipeline/kids.py).
 export interface KidsData {
   bands: [number, number][];
-  rates: Record<"1" | "2", number[][][][][]>; // [band][has kids][edu][race][WANT_KIDS]
+  schemaVersion: 2;
+  rates: Record<"1" | "2", number[][][][]>; // [band][edu][race][WANT_KIDS]; parity marginalized
 }
 
 // Shape of beliefs.json (see pipeline/beliefs.py): religion x party.
@@ -271,10 +279,6 @@ export function heightFilter(q: Query): { lo: number; hi: number } | null {
   const h = q.filters.height;
   if (h === "any") return null;
   if (h) return h.lo <= HEIGHT_MIN && h.hi >= HEIGHT_MAX ? null : h;
-  if (q.you.height === undefined) return null;
-  const d = heightDefault(q);
-  if (d === "le") return { lo: HEIGHT_MIN, hi: q.you.height };
-  if (d === "ge") return { lo: q.you.height, hi: HEIGHT_MAX };
   return null;
 }
 
@@ -343,7 +347,9 @@ const acc = (): Acc => ({ value: 0, variance: 0 });
 function add(a: Acc, C: number, varC: number, p: number, neff: number, mod: number) {
   a.value += C * p * mod;
   a.variance += (p * mod) ** 2 * varC;
-  if (neff > 0 && p < 1) a.variance += (C * mod) ** 2 * (p * (1 - p)) / neff;
+  // ACS-only approximate sampling variance. Synthetic-rate uncertainty
+  // is not a design-based ACS confidence interval.
+  void neff;
 }
 
 // Walk one sex down the funnel. Returns accumulated counts at every stage
@@ -480,9 +486,9 @@ function pool(
   const wantMix = (a: number, edu: number, kids: number, race: number) => {
     if (!K) return null;
     const i = K.bands.findIndex(([lo, hi]) => a >= lo && a <= hi);
-    const cell = K.rates[sx][i < 0 ? (a < K.bands[0][0] ? 0 : K.bands.length - 1) : i][kids][edu];
-    // Older kids.json had no race level.
-    return (Array.isArray(cell[0]) ? (cell as unknown as number[][])[race] : cell) as number[];
+    void kids;
+    if (i < 0 || K.schemaVersion !== 2) return null;
+    return K.rates[sx][i][edu][race];
   };
   const fBmi = (a: number, ba: number, race: number) =>
     withFilters && f.bmiMax ? 1 - (bmiRate(g, sex, a, s.id, f.bmiMax, ba, race) ?? 0) : 1;
@@ -580,11 +586,15 @@ function pool(
       // races you picked.
       const rs = s.race?.[sx]?.[mg]?.[b] ?? new Array(NRACE).fill(1 / NRACE);
       const tilt = g.raceTilt?.[sx]?.[b]?.[MARG_INDEX[mg]];
-      const mixes = Array.from({ length: 12 }, (_, ei) => {
-        if (!tilt) return rs;
-        const v = rs.map((x, r) => x * (tilt[ei]?.[r] ?? 1));
-        const t = v.reduce((x, y) => x + y, 0);
-        return t > 0 ? v.map((x) => x / t) : rs;
+      const eiMass = new Array(12).fill(0);
+      for (let c = 0; c < INST; c++) {
+        const { cohab, edu, inc } = cellOf(c);
+        if (cohab === 0) eiMass[edu * 4 + inc] += p[c];
+      }
+      const calibrated = jointMargins(eiMass, rs, tilt);
+      const mixes = calibrated.map((row) => {
+        const mass = row.reduce((x, y) => x + y, 0);
+        return mass > 0 ? row.map((v) => v / mass) : rs;
       });
       const picked = withFilters && f.races.length ? f.races : null;
       const kr = Array.from({ length: NRACE }, (_, r) => (!picked || picked.includes(r) ? 1 : 0));
@@ -694,7 +704,7 @@ function pool(
       const chains = ages.map(chain);
       const avgStep = (k: number) =>
         pFinal > 0 ? chains.reduce((t, ch, i) => t + sh[i] * ch.byStep[k], 0) / S / pFinal : 0;
-      const spark = q.model.spark > 0 ? q.model.spark : 1;
+      const spark = q.model.spark ?? 1;
       const accs = [out.height, out.smoke, out.religion, out.politics, out.wantKids, out.bmi, out.orientation, out.relationship, out.looking];
       accs.forEach((ac, k) => add(ac, C, varC, pFinal, n, avgStep(k)));
       add(out.spark, C, varC, pFinal, n, avgStep(accs.length - 1) * spark);
@@ -823,7 +833,12 @@ function pool(
 const SEX_NOUN: Record<Sex, [string, string]> = { 1: ["man", "men"], 2: ["woman", "women"] };
 export const noun = (sex: Sex, plural = true) => SEX_NOUN[sex][plural ? 1 : 0];
 
-export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail = true): Result {
+export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail = true, omitHeight = false, omitKids = false): Result {
+  const issues: string[] = [];
+  if (q.filters.wantKids.length && (q.seek.hi > 49 || g.kids?.schemaVersion !== 2)) {
+    issues.push('Kids-someday estimates support ages 18–49 only. Narrow the range or remove this filter.');
+    q = { ...q, filters: { ...q.filters, wantKids: [] } };
+  }
   const T = q.seek.sex;
   const M = q.me.sex;
   const lo = Math.max(g.ageMin, Math.min(q.seek.lo, q.seek.hi));
@@ -831,8 +846,10 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   const t = pool(s, g, q, T, M, lo, hi, true, !detail);
   const who = noun(T);
   const steps: Step[] = [];
-  const push = (key: string, label: string, dropped: string, a: Acc, kind: StepKind, sources: Source[], note: string) =>
+  const push = (key: typeof FUNNEL_ORDER[number], label: string, dropped: string, a: Acc, kind: StepKind, sources: Source[], note: string) => {
+    if (steps.length && FUNNEL_ORDER.indexOf(key) <= FUNNEL_ORDER.indexOf(steps[steps.length-1].key as typeof key)) throw new Error('Funnel registry order mismatch');
     steps.push({ key, label, dropped, value: a.value, moe: Z90 * Math.sqrt(a.variance), kind, sources, note });
+  };
 
   push("pop", `Everyone in the ${s.kind === "micro" ? "area" : s.kind === "rural" ? "county" : "metro"}`, "", { value: s.pop, variance: 0 }, "census", [SOURCES.pop],
     "Total population of the Census metropolitan or micropolitan statistical area, all ages.");
@@ -848,7 +865,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   push("partner", "Not living with a partner", "living with a partner", t.partner, "microdata", [SOURCES.pums],
     "Removes unmarried people who live with a partner, plus people in institutions (prisons, nursing homes). Rates come from microdata for this area, shrunk toward the regional rate where the sample is thin.");
   if (q.filters.neverMarried)
-    push("nm", "Never married", "divorced or widowed", t.neverMarried, "census", [SOURCES.acs], "Excludes divorced and widowed people.");
+    push("nm", "Never married", "divorced or widowed", t.neverMarried, "microdata", [SOURCES.acs, SOURCES.pums], "Excludes divorced and widowed people.");
   if (q.filters.edu > 0)
     push("edu", q.filters.edu === 1 ? "College grads" : "Graduate degrees", "not enough degree",
       t.edu, "microdata", [SOURCES.pums],
@@ -861,15 +878,15 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   if (q.filters.notWithParents)
     push("parents", "Not living with their parents", "living with their parents", t.parents, "microdata", [SOURCES.pums],
       "Removes adult children of the householder: people living in a parent's (or step-parent's) home. Roommates and people whose parents live with them count as independent.");
-  if (q.filters.races.length) {
-    const names = [...q.filters.races].sort().map((r) => RACES[r]);
-    push("race", `${names.join(", ")}`, "other races and ethnicities", t.race, "microdata", [SOURCES.pums],
-      "Race and ethnicity mix of available singles of this sex, age and marital status in this metro (Hispanic of any race; other groups non-Hispanic). Adjusted for each education and income group by how race varies with them nationally among singles of the same sex, age and marital status, so it combines properly with the degree and income filters. Assumed unrelated to kids at home and living situation beyond that.");
-  }
   if (q.filters.incomeMin > 0)
     push("income", `Earning $${q.filters.incomeMin}k+`, "earning less",
       t.income, "microdata", [SOURCES.pums],
       "Personal income (all sources, 2024 dollars), not household income. Measured jointly with education, kids and living situation, so the correlations hold. The microdata here come in four brackets ($25k, $60k, $120k); a floor inside one keeps the national share of that bracket at or above it, by sex, age and education. Not adjusted for local cost of living.");
+  if (q.filters.races.length) {
+    const names = [...q.filters.races].sort().map((r) => RACES[r]);
+    push('race', names.join(', '), 'other races and ethnicities', t.race, 'microdata', [SOURCES.pums],
+      'Local race and education/income margins calibrated jointly using national associations. Other unmeasured correlations remain assumptions.');
+  }
   const hf = heightFilter(q);
   if (hf) {
     const ft = (h: number) => `${Math.floor(h / 12)}′${h % 12}″`;
@@ -884,7 +901,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   }
   if (q.filters.nonSmoker && g.health)
     push("smoke", "Non-smokers", "smoke", t.smoke, "survey", [SOURCES.nhanes, SOURCES.brfss],
-      "Removes current cigarette smokers. Rates for unpartnered adults by sex, age, degree (bachelor's or not) and race/ethnicity from a model of NHANES 2017-2023, shifted by how the place's (or its state's) 2024 BRFSS rate differs from the US, beyond what its race, education and age make-up already explains. Follows the degree and race mix of who's left; assumed unrelated to income and the other filters.");
+      "Current cigarette smoking for unpartnered adults, modeled from NHANES 2017–2023 by sex, age, degree and race. Local or state BRFSS shifts use the latest supported vintage, disclosed in area context. Adjustments are ecological and net of composition. Residual associations with income and other filters are unmodeled.");
   if (q.filters.religions.length && g.religion) {
     const names = [...q.filters.religions].sort().map((r) => RELIGIONS[r]);
     push("religion", names.join(", "), "other religions (or none)", t.religion, "survey", [SOURCES.ces, SOURCES.religionLocal],
@@ -907,12 +924,12 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
     const label = out.length === 1 ? `Not "${WANT_KIDS[out[0]].toLowerCase()}"` : q.filters.wantKids.map((r) => WANT_KIDS[r]).join(" or ");
     push("wantKids", out.length === 1 && out[0] === 2 ? "Open to kids" : out.length === 1 && out[0] === 0 ? "Not set on kids" : label,
       out.map((r) => WANT_KIDS[r].toLowerCase()).join(" and "), t.wantKids, "survey", [SOURCES.nsfgWant],
-      "Whether unpartnered adults want a(nother) baby someday (\"Do you, yourself, want to have a(nother) baby at some time in the future?\"), by sex, age, education, whether they already have kids and race/ethnicity (Asian singles share the survey's ‘other’ group), from the National Survey of Family Growth 2022-2023. Follows the education, kids and race mix of who's left; assumed unrelated to religion and income. The survey stops at 49, so older ages use the 45-49 rates. Intentions change, in both directions.");
+      "Whether unpartnered adults ages 18–49 want a(nother) baby someday, by sex, age, education and race (NSFG 2022–2023). Biological parenthood is marginalized; children-at-home status does not condition this estimate. Above age 49 is unsupported. Intentions change; residual associations with religion, income and children at home are not modeled.");
   }
   if (q.filters.bmiMax && g.health)
     push("bmi", `BMI under ${q.filters.bmiMax}`, `BMI ${q.filters.bmiMax} or higher`,
       t.bmi, "survey", [SOURCES.nhanes, SOURCES.brfss],
-      "Measured (not self-reported) BMI for unpartnered adults by sex, age, degree and race/ethnicity from a model of NHANES 2017-2023, shifted by how the place's (or its state's) 2024 BRFSS rate differs from the US, beyond what its race, education and age make-up already explains (overweight for cutoffs up to 25, obesity for 30 and up, blended between). Assumed unrelated to income and the other filters. BMI is a blunt instrument; this is a population estimate, not a judgment.");
+      "Measured BMI modeled from NHANES 2017–2023 by sex, age, degree and race. Local/state BRFSS shifts use the disclosed supported vintage, net of composition (overweight for cutoffs through 25, obesity above 30, blended between). Residual associations with income and other filters are unmodeled. This is a population estimate, not a judgment.");
   if (q.model.orientation)
     push("orientation", `Into ${noun(M)}`, `not into ${noun(M)}`, t.orientation, "survey", [SOURCES.gallup, SOURCES.nsfg],
       "National rates by sex and age (not local). Bisexual people count as attracted to both.");
@@ -922,17 +939,20 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
   if (q.model.looking)
     push("looking", "Actually looking", "not looking", t.looking, "survey", [SOURCES.pewLooking],
       "Share of singles currently looking for a relationship or dates, by age and sex. Many singles aren't.");
-  if (q.model.spark > 0)
+  if (q.model.spark !== null)
     push("spark", `Mutual spark (${Math.round(q.model.spark * 100)}%)`, "no spark", t.spark, "dial", [SOURCES.backus],
       "Your own assumption. Backus used 5% for mutual attraction.");
 
-  for (let i = 1; i < steps.length; i++) steps[i].value = Math.min(steps[i].value, steps[i - 1].value);
+  for (let i = 1; i < steps.length; i++) {
+    if (!Number.isFinite(steps[i].value) || steps[i].value < 0 || steps[i].value > steps[i - 1].value + Math.max(1, s.pop) * 1e-5)
+      throw new Error(`Invalid funnel stage: ${steps[i].key}`);
+  }
 
   let competition: Competition | null = null;
-  if (choice) {
+  if (choice && !issues.length) {
     // Competitors: available people of your sex at every age, into the sex
     // you're seeking, not seeing anyone and looking. Your filters don't apply.
-    const comp = pool(s, g, q, M, T, g.ageMin, g.ageMax, false);
+    const comp = pool(s, g, q, M, T, g.ageMin, Math.min(85,g.ageMax), false, !detail);
     // Your filters are your preferences, not your competitors'. How crowded
     // the market is comes from the whole pool before your filters; how you
     // stack up comes from what your filtered pool goes for. The adjusted pool
@@ -947,10 +967,10 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
       f.wantKids.length > 0 ||
       heightFilter(q) !== null;
     const base = filtered ? pool(s, g, q, T, M, lo, hi, false, !detail) : t;
-    const relPairing = g.religion?.pairing[`${T}${M}`];
+    const relPairing = T === M ? undefined : g.religion?.pairing[`${T}${M}`];
     const polPairing = g.politics?.pairing[`${T}${M}`];
-    const market = compete(choice, base.typed, comp.typed, q, detail, relPairing, polPairing);
-    const mine = filtered ? compete(choice, t.typed, comp.typed, q, detail, relPairing, polPairing) : market;
+    const market = compete(choice, base.typed, comp.typed, { ...q, filters: { ...q.filters, height: 'any' } }, detail, relPairing, polPairing, omitHeight, omitKids, g.health?.cond?.height);
+    const mine = filtered ? compete(choice, t.typed, comp.typed, q, detail, relPairing, polPairing, omitHeight, omitKids, g.health?.cond?.height) : market;
     if (market && mine) {
       const multiplier = market.ratio > 0 ? mine.relative / market.ratio : 0;
       competition = {
@@ -958,7 +978,7 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
         inRunning: market.inRunning,
         ratio: market.ratio,
         multiplier,
-        adjusted: mine.targets * multiplier,
+        adjusted: mine.targets * multiplier * (q.model.spark ?? 1),
       };
     }
   }
@@ -969,7 +989,10 @@ export function compute(s: Shard, g: Global, q: Query, choice?: Choice, detail =
     final: steps[steps.length - 1],
     competition,
     composition: t.comp,
-    records: t.records,
+    effectiveSupport: t.records,
+    demographicPool: t.looking.value,
+    scenarioPool: t.spark.value,
+    issues,
     ctx: g.ctx?.[s.id] ?? null,
   };
 }

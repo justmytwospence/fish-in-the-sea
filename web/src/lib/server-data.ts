@@ -26,8 +26,18 @@ export interface MarketIndex {
   places: [name: string, state: string, market: string, pop: number, lat: number | null, lon: number | null][];
 }
 
+let manifestP: Promise<{ schemaVersion: number; buildId: string }> | undefined;
+export function loadManifest() {
+  return manifestP ??= readFile(path.join(DIR,'manifest.json'),'utf8').then(JSON.parse).then((m) => {
+    if (m.schemaVersion !== 2 || !m.buildId) throw new Error('Incompatible data manifest');
+    return m;
+  }).catch((e) => { manifestP = undefined; throw e; });
+}
 async function json<T>(file: string): Promise<T> {
-  return JSON.parse(await readFile(path.join(DIR, file), "utf8")) as T;
+  const [manifest, text] = await Promise.all([loadManifest(),readFile(path.join(DIR,file),'utf8')]);
+  const data = JSON.parse(text);
+  if (data.schemaVersion !== 2 || data.buildId !== manifest.buildId) throw new Error('Incompatible snapshot');
+  return data as T;
 }
 
 // Census tables plus context.json (health rates, per-metro context).
@@ -39,15 +49,15 @@ export function loadGlobal() {
     json<PoliticsData>("politics.json"),
     json<KidsData>("kids.json"),
     json<BeliefsData>("beliefs.json"),
-  ]).then(([g, c, r, p, k, b]) => mergeContext(g, c, r, p, k, b)));
+  ]).then(([g, c, r, p, k, b]) => mergeContext(g, c, r, p, k, b)).catch((e) => { globalP = undefined; throw e; }));
 }
 
 export function loadChoice() {
-  return (choiceP ??= json<Choice>("choice.json"));
+  return (choiceP ??= json<Choice>('choice.json').catch((e) => { choiceP = undefined; throw e; }));
 }
 
 export function loadMarkets() {
-  return (marketsP ??= json<MarketIndex>("markets.json"));
+  return (marketsP ??= json<MarketIndex>('markets.json').catch((e) => { marketsP = undefined; throw e; }));
 }
 
 export function loadShard(id: string): Promise<Shard | null> {

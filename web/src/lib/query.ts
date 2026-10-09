@@ -20,7 +20,7 @@ export const DEFAULT_QUERY: Query = {
     politics: [],
     wantKids: [],
   },
-  model: { separated: false, orientation: true, relationship: true, looking: false, spark: 0 },
+  model: { separated: false, orientation: true, relationship: true, looking: false, spark: null },
   you: {},
 };
 
@@ -36,7 +36,9 @@ const clampAge = (n: number) => Math.max(18, Math.min(90, Math.round(n)));
 const sexOf = (c: string | undefined, d: Sex): Sex => (c === "m" ? 1 : c === "f" ? 2 : d);
 
 // ?in=<market>&me=m36&seek=f30-39&f=nm,ba,nokids&m=sep,-orient&spark=5
+export function queryEncodingSupported(p:Params) { const v=get(p,'v'); return v===undefined || v==='1' || v==='2'; }
 export function parseQuery(p: Params): Query {
+  if(!queryEncodingSupported(p)) throw new Error('Unsupported query version');
   const q = structuredClone(DEFAULT_QUERY);
   const market = get(p, "in");
   if (market && /^[a-z0-9-]+$/.test(market)) q.market = market;
@@ -68,7 +70,8 @@ export function parseQuery(p: Params): Query {
     orientation: !m.has("-orient"),
     relationship: !m.has("-rel"),
     looking: m.has("look"),
-    spark: Math.max(0, Math.min(100, Number(get(p, "spark") ?? 0) || 0)) / 100,
+    spark: get(p, 'spark') === undefined || (get(p, 'v') !== '2' && Number(get(p, 'spark')) === 0)
+      ? null : Math.max(0, Math.min(100, Number(get(p, 'spark')) || 0)) / 100,
   };
   // you=e1,i85,k0,p0,h70: education, income ($k), kids, previously married, height
   q.you = {};
@@ -77,7 +80,7 @@ export function parseQuery(p: Params): Query {
     if (!m2) continue;
     const v = +m2[2];
     if (m2[1] === "e" && v <= 2) q.you.edu = v;
-    if (m2[1] === "i" && v <= 999) q.you.income = v;
+    if (m2[1] === "i" && v <= 250) q.you.income = v;
     if (m2[1] === "k" && v <= 1) q.you.kids = v;
     if (m2[1] === "p" && v <= 1) q.you.prev = v;
     if (m2[1] === "h" && v >= 54 && v <= 84) q.you.height = v;
@@ -91,12 +94,16 @@ export function parseQuery(p: Params): Query {
   if (hr) q.filters.height = { lo: inch(Math.min(+hr[1], +hr[2])), hi: inch(Math.max(+hr[1], +hr[2])) };
   else if ((f.has("hle") || f.has("hge")) && q.you.height !== undefined)
     q.filters.height = f.has("hle") ? { lo: HEIGHT_MIN, hi: q.you.height } : { lo: q.you.height, hi: HEIGHT_MAX };
+  // Legacy links implicitly imposed a sex-relative height preference.
+  if (get(p, 'v') !== '2' && q.filters.height === undefined && q.you.height !== undefined && q.me.sex !== q.seek.sex)
+    q.filters.height = q.me.sex === 1 ? { lo: HEIGHT_MIN, hi: q.you.height } : { lo: q.you.height, hi: HEIGHT_MAX };
   return q;
 }
 
 export function serializeQuery(q: Query): string {
   const s = (x: Sex) => (x === 1 ? "m" : "f");
   const p = new URLSearchParams();
+  p.set('v', '2');
   p.set("in", q.market);
   p.set("me", `${s(q.me.sex)}${q.me.age ?? ""}`);
   p.set("seek", `${s(q.seek.sex)}${q.seek.lo}-${q.seek.hi}`);
@@ -123,7 +130,7 @@ export function serializeQuery(q: Query): string {
     q.model.looking && "look",
   ].filter(Boolean);
   if (m.length) p.set("m", m.join(","));
-  if (q.model.spark > 0) p.set("spark", String(Math.round(q.model.spark * 100)));
+  if (q.model.spark !== null) p.set('spark', String(Number((q.model.spark * 100).toFixed(10))));
   const y = q.you;
   const you = [
     y.edu !== undefined && `e${y.edu}`,

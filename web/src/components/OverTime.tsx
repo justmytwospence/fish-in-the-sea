@@ -16,7 +16,7 @@ export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[
   const [hover, setHover] = useState<number | null>(null);
 
   useEffect(() => {
-    const ro = new ResizeObserver(([e]) => setW(Math.max(300, e.contentRect.width)));
+    const ro = new ResizeObserver(([e]) => setW(Math.max(1, e.contentRect.width)));
     ro.observe(ref.current!);
     return () => ro.disconnect();
   }, []);
@@ -25,7 +25,7 @@ export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[
   const h = Math.round(Math.min(340, Math.max(240, w * 0.5)));
   const a0 = points[0].age;
   const a1 = points[points.length - 1].age;
-  const yMax = Math.max(...points.map((p) => Math.max(p.raw, p.adjusted))) * 1.08;
+  const yMax = Math.max(1, ...points.map((p) => Math.max(p.raw, p.adjusted))) * 1.08;
   const px = (a: number) => M.left + ((a - a0) / (a1 - a0)) * (w - M.left - M.right);
   const py = (v: number) => h - M.bottom - (v / yMax) * (h - M.top - M.bottom);
   const line = (key: "raw" | "adjusted") => points.map((p, i) => `${i ? "L" : "M"}${px(p.age).toFixed(1)},${py(p[key]).toFixed(1)}`).join("");
@@ -40,16 +40,12 @@ export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[
   const them = noun(query.seek.sex);
 
   return (
-    <section aria-label="Over time" className="mt-16 border-t border-rule pt-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Over time</p>
+    <section aria-label="Age scenarios today" className="mt-16 border-t border-rule pt-10">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Cross-sectional scenarios</p>
       <h2 className="mt-3 font-display text-3xl tracking-tight">
-        {last.adjusted < now.adjusted * 0.95
-          ? "It gets harder from here."
-          : last.adjusted > now.adjusted * 1.05
-            ? "It gets easier from here. Probably."
-            : "Roughly holding steady."}
+        Age scenarios today (not a forecast)
       </h2>
-      <div role="radiogroup" aria-label="Age range over time" className="mt-4 inline-flex rounded-full border border-rule p-1">
+      <div role="group" aria-label="Age scenario mode" className="mt-4 inline-flex rounded-full border border-rule p-1">
         {(
           [
             [true, "Sliding with you"],
@@ -58,8 +54,7 @@ export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[
         ).map(([v, label]) => (
           <button
             key={String(v)}
-            role="radio"
-            aria-checked={slide === v}
+            aria-pressed={slide === v}
             onClick={() => setSlide(v)}
             className={`rounded-full px-4 py-1.5 text-sm transition-colors ${slide === v ? "bg-ink text-paper" : "text-muted hover:text-ink"}`}
           >
@@ -68,7 +63,7 @@ export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[
         ))}
       </div>
       <p className="mt-3 max-w-xl text-muted">
-        Your prospects from age {first.age} to {last.age},{" "}
+        Today&apos;s cross-sectional model for ages {first.age} to {last.age},{" "}
         {slide ? (
           <>
             with the ages you&apos;re looking for sliding along with you (you&apos;re {query.me.age} seeking{" "}
@@ -81,13 +76,11 @@ export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[
           </>
         )}{" "}
         and everything else held the same.
-        Five years from now your adjusted pool is {change(last) >= 0 ? "up" : "down"}{" "}
-        <strong className="text-ink">{pct(Math.abs(change(last)))}</strong>; five years ago it was{" "}
-        {change(first) >= 0 ? "up" : "down"} {pct(Math.abs(change(first)))}.
+        {now.adjusted>0 ? <>At age {last.age}, the model index is {change(last)>=0?'higher':'lower'} <strong className="text-ink">{pct(Math.abs(change(last)))}</strong>; at age {first.age} it is {change(first)>=0?'higher':'lower'} {pct(Math.abs(change(first)))}.</> : <>Relative change is unavailable from a zero baseline.</>}
       </p>
 
       <div ref={ref} className="relative mt-6" onMouseLeave={() => setHover(null)}>
-        <svg width={w} height={h} role="img" aria-label={`Raw and adjusted pool of ${them} by your age, ${first.age} to ${last.age}`} className="block">
+        <svg width={w} height={h} role="img" aria-label={`Scenario pool and competition index for ${them} by profile age, ${first.age} to ${last.age}; not forecasts. Table values below.`} className="block">
           {yTicks.map((t) => (
             <g key={t}>
               <line x1={M.left} x2={w - M.right} y1={py(t)} y2={py(t)} className="stroke-rule" opacity={0.5} />
@@ -111,10 +104,10 @@ export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[
           <path d={line("raw")} fill="none" className="stroke-muted" strokeWidth={2} />
           <path d={line("adjusted")} fill="none" className="stroke-accent" strokeWidth={2} />
           {[
-            ["raw", "Raw pool", "fill-muted"],
-            ["adjusted", "Adjusted", "fill-accent"],
+            ["raw", "Scenario", "fill-muted"],
+            ["adjusted", "Index", "fill-accent"],
           ].map(([k, label, cls]) => (
-            <text key={k} x={px(last.age) + 8} y={py(last[k as "raw" | "adjusted"]) + 4} className={`text-[11px] font-medium ${cls}`}>
+            <text key={k} x={px(last.age) + 8} y={py(last[k as 'raw' | 'adjusted']) + (k==='raw' && Math.abs(py(last.raw)-py(last.adjusted))<20?-12:4)} className={`text-[11px] font-medium ${cls}`}>
               {label}
             </text>
           ))}
@@ -128,6 +121,12 @@ export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[
                 width={(w - M.left - M.right) / (points.length - 1)}
                 height={h - M.top - M.bottom}
                 fill="transparent"
+                tabIndex={0}
+                role="button"
+                aria-label={`Age ${p.age}: pool ${fmt(p.raw)}, index ${fmt(p.adjusted)}`}
+                onFocus={() => setHover(i)}
+                onBlur={() => setHover(null)}
+                onPointerDown={() => setHover(i)}
                 onMouseEnter={() => setHover(i)}
               />
             </g>
@@ -143,15 +142,16 @@ export default function OverTime({ sliding, fixed, query }: { sliding: AgePoint[
               At {hp.age}, seeking {hp.lo}–{hp.hi}
             </p>
             <p className="mt-1 text-muted">
-              Raw pool <span className="tabular-nums text-ink">{fmt(hp.raw)}</span>
+              Scenario pool <span className="tabular-nums text-ink">{fmt(hp.raw)}</span>
             </p>
             <p className="text-muted">
-              Adjusted <span className="tabular-nums text-ink">{fmt(hp.adjusted)}</span>
-              {hp.age !== now.age && <> ({change(hp) >= 0 ? "+" : "−"}{pct(Math.abs(change(hp)))} vs. now)</>}
+              Competition index <span className="tabular-nums text-ink">{fmt(hp.adjusted)}</span>
+              {hp.age !== now.age && now.adjusted>0 && <> ({change(hp) >= 0 ? "+" : "−"}{pct(Math.abs(change(hp)))} vs. now)</>}
             </p>
           </div>
         )}
       </div>
+      <details className="mt-3 text-sm"><summary className="cursor-pointer">Age scenario values as a table</summary><table className="mt-2 w-full"><caption className="sr-only">Cross-sectional ages today, not forecasts</caption><thead><tr><th scope="col">Profile age</th><th scope="col">Target ages</th><th scope="col">Scenario pool</th><th scope="col">Competition index</th></tr></thead><tbody>{points.map(p=><tr key={p.age}><th scope="row">{p.age}</th><td>{p.lo}–{p.hi}</td><td>{fmt(p.raw)}</td><td>{fmt(p.adjusted)}</td></tr>)}</tbody></table></details>
       <p className="mt-2 max-w-xl text-xs text-muted">
         Uses today&apos;s population: each point is what the market looks like right now for someone that age, not a
         forecast of how your own cohort will pair off.

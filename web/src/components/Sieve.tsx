@@ -71,8 +71,13 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       const e = engine.current;
       if (!e || from >= last) return;
       const next = from + 1;
-      setBusy(true);
       setCur(next);
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        e.set(p.field[next], p.keep[next]);
+        if (next >= last) setPlaying(false);
+        return;
+      }
+      setBusy(true);
       e.transition(p.keep[next], () => {
         setBusy(false);
         if (next >= last) setPlaying(false);
@@ -89,8 +94,9 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       const prev = from - 1;
       // Everyone this step had becomes a keeper again and the people the
       // previous step dropped rise back in.
-      setBusy(true);
       setCur(prev);
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { e.set(p.field[prev], p.keep[prev]); return; }
+      setBusy(true);
       e.restore(p.field[prev], p.keep[prev], () => setBusy(false));
     },
     [p, first],
@@ -116,8 +122,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
       if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
       const tag = (ev.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-      const r = wrap.getBoundingClientRect();
-      if (r.bottom < 0 || r.top > window.innerHeight) return;
+      if (!wrap.parentElement?.parentElement?.contains(document.activeElement)) return;
       if (ev.key === "ArrowRight") goTo(cur + 1);
       else if (ev.key === "ArrowLeft") goTo(cur - 1);
       else return;
@@ -150,7 +155,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
               Step {cur - first + 1} of {steps.length - first}
               {thin && s.kind === "microdata" && (
                 <span
-                  title="Few survey records behind this step here, so the estimate leans on regional rates. Treat it as rough."
+                  title="Low effective weighted support: estimates borrow regional information. This is not a count of local respondents."
                   className="ml-2 rounded border border-accent px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-accent"
                 >
                   thin data
@@ -240,7 +245,7 @@ export default function Sieve({ steps, thin = false }: { steps: Step[]; thin?: b
                     aria-label={`Go to step ${k + 1}: ${st.label}`}
                     aria-current={i === cur ? "step" : undefined}
                     onClick={() => goTo(i)}
-                    className={`block h-3 w-3 rounded-full transition-colors hover:ring-2 hover:ring-accent-soft ${
+                    className={`block h-6 w-6 rounded-full transition-colors hover:ring-2 hover:ring-accent-soft ${
                       i === cur ? "bg-accent" : i < cur ? "bg-muted" : "bg-rule"
                     }`}
                   />

@@ -7,19 +7,19 @@ export interface WhatIf {
   label: string;
   query: Query;
   raw: number;
-  adjusted: number;
+  adjusted: number | null;
   dRaw: number; // change vs. your current search
-  dAdjusted: number;
+  dAdjusted: number | null;
 }
 
 const AGE_STEP = 1;
 
 // Every one-notch loosening of your current search, with what it does to
 // the raw and competition-adjusted pools.
-export function whatIfs(s: Shard, g: Global, q: Query, choice: Choice): { base: { raw: number; adjusted: number }; options: WhatIf[] } {
+export function whatIfs(s: Shard, g: Global, q: Query, choice: Choice): { base: { raw: number; adjusted: number | null }; options: WhatIf[] } {
   const run = (qq: Query) => {
     const r = compute(s, g, qq, choice, false);
-    return { raw: r.final.value, adjusted: r.competition?.adjusted ?? r.final.value };
+    return { raw: r.final.value, adjusted: r.competition?.adjusted ?? null };
   };
   const base = run(q);
   const f = q.filters;
@@ -69,7 +69,7 @@ export function whatIfs(s: Shard, g: Global, q: Query, choice: Choice): { base: 
 
   const options = cands.map((c) => {
     const r = run(c.query);
-    return { ...c, ...r, dRaw: r.raw - base.raw, dAdjusted: r.adjusted - base.adjusted };
+    return { ...c, ...r, dRaw: r.raw - base.raw, dAdjusted: r.adjusted !== null && base.adjusted !== null ? r.adjusted - base.adjusted : null };
   });
   return { base, options };
 }

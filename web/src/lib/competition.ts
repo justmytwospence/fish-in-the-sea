@@ -16,9 +16,11 @@
 import { heightDist, heightLogAppeal, KIDS_LOG, type Sex } from "./assumptions";
 import type { Query } from "./model";
 import { NPOL, NRACE, NREL, NTYPE, typeOf, type Typed } from "./types";
+import { heightFilter } from './model';
 
 export interface ChoiceDir {
   n: number;
+  validation?: { status: 'validated' | 'unsupported'; ageSupport?: [number, number]; ageBands?: {lo:number;hi:number;supported:boolean}[] };
   age: number[];
   edu: number[][];
   inc: number[][];
@@ -141,10 +143,11 @@ function phi(L: Record<Dim, number[][]>, dims: Dim[]): Float64Array {
 }
 
 // Discretized normal over heights in half-inch steps.
-function heightGrid(mean: number, sd: number) {
+function heightGrid(mean: number, sd: number, range?: { lo: number; hi: number } | null) {
   const hs: number[] = [];
   const ws: number[] = [];
-  for (let h = mean - 3 * sd; h <= mean + 3 * sd; h += 0.5) {
+  for (let h = 40; h <= 96; h += 0.5) {
+    if (range && (range.lo > 54 && h < range.lo - .5 || range.hi < 84 && h > range.hi + .5)) continue;
     hs.push(h);
     ws.push(Math.exp(-0.5 * ((h - mean) / sd) ** 2));
   }
@@ -152,7 +155,29 @@ function heightGrid(mean: number, sd: number) {
   return { hs, ws: ws.map((w) => w / tot) };
 }
 
-const CAND_HEIGHTS = Array.from({ length: 49 }, (_, i) => 56 + i * 0.5); // 4'8" to 6'8"
+const CAND_HEIGHTS = Array.from({ length: 61 }, (_, i) => 54 + i * 0.5); // unified supported range
+
+// Reused across markets and profile edits. The nonlinear height integral
+// depends on target age/range, not local population; only age masses vary.
+export type HeightModel = Record<string, number[][][]>;
+const heightModels = new WeakMap<HeightModel,number>();
+let heightModelId=0;
+const heightProfiles = new Map<string, { curve:Float64Array; atHeight:Float64Array; means:Float64Array }>();
+function heightProfile(T:Sex,M:Sex,age:number,race:number,range:ReturnType<typeof heightFilter>,model?:HeightModel) {
+  const dist=(sex:Sex,a:number,r:number)=> { const pair=model?.[String(sex)]?.[a<40?0:a<60?1:2]?.[r];return pair?{mean:pair[0],sd:pair[1]}:heightDist(sex,a); };
+  if(model && !heightModels.has(model)) heightModels.set(model,++heightModelId);
+  const key=JSON.stringify([T,M,age,race,range,model?heightModels.get(model):0]);
+  const cached=heightProfiles.get(key); if(cached) return cached;
+  const d=dist(T,age,race), target=heightGrid(d.mean,d.sd,range);
+  const atHeight=Float64Array.from({length:113},(_,i)=>target.hs.reduce((s,ht,k)=>s+target.ws[k]*Math.exp(heightLogAppeal(T,ht,40+i*.5)),0));
+  const mx=Math.max(...CAND_HEIGHTS.map(h=>atHeight[Math.round((h-40)*2)]));
+  for(let i=0;i<atHeight.length;i++) atHeight[i]/=mx;
+  const curve=Float64Array.from(CAND_HEIGHTS,h=>atHeight[Math.round((h-40)*2)]);
+  const means=Float64Array.from({length:73*NRACE},(_,i)=>{const d=dist(M,18+Math.floor(i/NRACE),i%NRACE),grid=heightGrid(d.mean,d.sd);return grid.hs.reduce((s,h,k)=>s+grid.ws[k]*atHeight[Math.round((h-40)*2)],0);});
+  const profile={curve,atHeight,means};
+  if(heightProfiles.size>=512) heightProfiles.delete(heightProfiles.keys().next().value!);
+  heightProfiles.set(key,profile);return profile;
+}
 
 export function compete(
   c: Choice,
@@ -162,12 +187,17 @@ export function compete(
   detail = true,
   religionPairing?: number[][],
   politicsPairing?: number[][],
+  omitHeight = false,
+  omitKids = false,
+  heightModel?: HeightModel,
 ): Competition | null {
   const T = q.seek.sex; // chooser: your target
   const M = q.me.sex; // candidate: you and your competitors
   const dir = c.dirs[`${T}${M}`];
-  if (!dir) return null;
+  if (!dir || dir.validation?.status !== 'validated' || targets.hi > 85 || q.me.age && q.me.age > 85) return null;
+  if (dir.validation.ageBands?.some(b => b.lo <= targets.hi && b.hi >= targets.lo && !b.supported)) return null;
   const L = tables(dir, M);
+  if (omitKids) L.kids = [[0,0],[0,0]];
   const nAx = targets.hi - targets.lo + 1;
   const nAy = comps.hi - comps.lo + 1;
 
@@ -182,7 +212,7 @@ export function compete(
       Ntype[t] += v;
       Ntot += v;
     }
-  if (Ntot <= 0) return null;
+  if (Ntot < 50 || comps.m.reduce((a,b)=>a+b,0) < 50) return null;
 
   // Age appeal, scaled so each target age's favorite partner age is 1.
   const A = new Float64Array(nAx * nAy);
@@ -198,23 +228,28 @@ export function compete(
 
   // Height appeal (opposite-sex only): per target age, normalized appeal of
   // each candidate height, and the average over competitors' heights.
-  const useHeight = T !== M;
+  const useHeight = T !== M && !omitHeight;
   const hn: Float64Array[] = [];
   const compH = new Float64Array(nAx).fill(1);
   const youH = new Float64Array(nAx).fill(1);
   if (useHeight) {
-    const comp = heightDist(M, q.me.age ?? Math.round((comps.lo + comps.hi) / 2));
-    const cg = heightGrid(comp.mean, comp.sd);
+    const masses = Array.from({ length: nAy }, (_, j) => comps.m.subarray(j * NTYPE, (j + 1) * NTYPE).reduce((a,b) => a+b, 0));
+    const totalMass = masses.reduce((a,b) => a+b, 0) || 1;
     for (let i = 0; i < nAx; i++) {
-      const td = heightDist(T, targets.lo + i);
-      const tg = heightGrid(td.mean, td.sd);
-      const appeal = (hc: number) =>
-        tg.hs.reduce((s, ht, k) => s + tg.ws[k] * Math.exp(heightLogAppeal(T, ht, hc)), 0);
-      const curve = CAND_HEIGHTS.map(appeal);
-      const mx = Math.max(...curve);
-      hn.push(Float64Array.from(curve, (v) => v / mx));
-      compH[i] = cg.hs.reduce((s, h, k) => s + cg.ws[k] * appeal(h), 0) / mx;
-      youH[i] = q.you.height ? appeal(q.you.height) / mx : compH[i];
+      const curve=new Float64Array(CAND_HEIGHTS.length);
+      compH[i]=0; youH[i]=0;
+      for(let r=0;r<NRACE;r++) {
+        const weight=Nage[i]>0?targets.race[i*NRACE+r]/Nage[i]:1/NRACE;
+        if(!weight) continue;
+        const profile=heightProfile(T,M,targets.lo+i,r,heightFilter(q),heightModel);
+        for(let k=0;k<curve.length;k++) curve[k]+=weight*profile.curve[k];
+        let average=0;
+        for(let j=0;j<nAy;j++) for(let cr=0;cr<NRACE;cr++) average+=comps.race[j*NRACE+cr]/totalMass*profile.means[(comps.lo+j-18)*NRACE+cr];
+        compH[i]+=weight*average;
+        if(q.you.height) youH[i]+=weight*profile.atHeight[Math.round((q.you.height-40)*2)];
+      }
+      hn.push(curve);
+      if(!q.you.height) youH[i]=compH[i];
     }
   }
 

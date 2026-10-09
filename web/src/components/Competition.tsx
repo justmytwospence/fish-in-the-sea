@@ -215,7 +215,7 @@ function Curve({
   return (
     <div>
       <p className="text-sm font-medium">{title}</p>
-      <svg viewBox={`0 0 ${W} ${H + 16}`} className="mt-1 w-full" role="img" aria-label={`${title}, peaking at ${fmtX(peak)}`}>
+      <svg viewBox={`0 0 ${W} ${H + 16}`} className="mt-1 w-full" role="img" aria-label={`${title}, ${Math.max(...ys)-Math.min(...ys)<1e-6?'flat modeled association':`peaking at ${fmtX(peak)}`}. Values are in the table below.`}>
         <path d={`${d}L${W},${H}L0,${H}Z`} className="fill-accent-soft" />
         <path d={d} className="fill-none stroke-accent" strokeWidth={2} />
         <line x1={0} x2={W} y1={H} y2={H} className="stroke-rule" />
@@ -237,25 +237,34 @@ function Curve({
           </g>
         )}
       </svg>
+      <details className="mt-2 text-xs"><summary className="cursor-pointer">{title} values as a table</summary><table className="mt-2 w-full"><caption className="sr-only">Relative modeled associations, not dating probabilities</caption><thead><tr><th scope="col">Value</th><th scope="col">Association scale (maximum 100)</th></tr></thead><tbody>{xs.map((x,i)=><tr key={x}><th scope="row">{fmtX(x)}</th><td className="text-center">{Math.round(ys[i]*100)}</td></tr>)}</tbody></table></details>
     </div>
   );
 }
 
-export default function Competition({
-  result,
-  query,
-  onYou,
-}: {
-  result: Result;
-  query: Query;
-  onYou: (you: You) => void;
-}) {
+export function PersonalProfile({query,onYou}:{query:Query;onYou:(you:You)=>void}) {
+  const you=query.you;
+  const set=(patch:Partial<You>)=>onYou({...you,...patch});
+  return <details className="mt-4"><summary className="cursor-pointer text-sm">Personal profile (optional; separate from partner preferences)</summary>
+    <p className="mt-2 text-xs text-muted">Unspecified values use modeled typical competitors, not known facts about you. Profile edits do not change market crowding.</p>
+    <div className="mt-3 grid max-w-xl grid-cols-2 gap-3">
+      <YouSelect label="Education" value={you.edu} options={EDU.map((label,v)=>({v,label}))} onChange={edu=>set({edu})}/>
+      <IncomeSlider value={you.income} onChange={income=>set({income})}/>
+      <YouSelect label="Kids at home" value={you.kids} options={YESNO.map((label,v)=>({v,label}))} onChange={kids=>set({kids})}/>
+      <YouSelect label="Been married" value={you.prev} options={YESNO.map((label,v)=>({v,label}))} onChange={prev=>set({prev})}/>
+      <YouSelect label="Politics" value={you.politics} options={PARTIES.map((label,v)=>({v,label}))} onChange={politics=>set({politics})}/>
+      <YouSelect label="Religion" value={you.religion} options={RELIGIONS.map((label,v)=>({v,label}))} onChange={religion=>set({religion})}/>
+      <YouSelect label="Race/ethnicity" value={you.race} options={RACES.map((label,v)=>({v,label}))} onChange={race=>set({race})}/>
+      {query.me.sex!==query.seek.sex && <YouSelect label="Height" value={you.height} options={Array.from({length:31},(_,i)=>({v:54+i,label:inches(54+i)}))} onChange={height=>set({height})}/>}
+    </div></details>;
+}
+
+export default function Competition({result,query}: {result:Result;query:Query}) {
   const c = result.competition;
-  if (!c) return null;
+  if (!c) return <section className="mt-8" aria-label="Competition"><h2 className="font-display text-2xl">Competition model</h2><p className="mt-2 text-muted">Unavailable for this search: model validation, effective support, a pool below 50, or ages outside 18–85. This is not a zero score.</p></section>;
   const them = noun(query.seek.sex);
   const us = noun(query.me.sex);
   const you = query.you;
-  const set = (patch: Partial<You>) => onYou({ ...you, ...patch });
   const one = noun(query.seek.sex, false);
   const mult = c.multiplier;
   const x2c = (v: number) => (v >= 10 ? fmt(v) : v.toFixed(2));
@@ -265,38 +274,23 @@ export default function Competition({
   // serious competitor? The adjusted pool combines them.
   const market = c.ratio < 0.9 ? "open" : c.ratio <= 1.1 ? "even" : "crowded";
   const standing = c.relative > 1.1 ? "strong" : c.relative >= 0.9 ? "typical" : "weak";
-  const VERDICTS: Record<string, string> = {
-    "open-strong": "The market tilts your way, and you're a strong match.",
-    "open-typical": "The market genuinely tilts your way.",
-    "open-weak": "The market tilts your way, which helps: on paper, you're not their type.",
-    "even-strong": "A fair market, and you stand out in it.",
-    "even-typical": "About a fair fight.",
-    "even-weak": "A fair market, but you're outmatched on paper.",
-    "crowded-strong":
-      mult >= 1 ? "A crowded market, but you out-compete it." : "A crowded market. You're above average, just not by enough.",
-    "crowded-typical": "You're outnumbered.",
-    "crowded-weak": mult < 0.5 ? "On paper, you're a long shot." : "Crowded, and you're not their type on paper.",
-  };
-  const verdict = VERDICTS[`${market}-${standing}`];
   const marketText = {
     open: `fewer ${us} in the running than ${them} (${x2c(c.ratio)} per ${one})`,
     even: `about one of ${us} in the running per ${one} (${x2c(c.ratio)})`,
     crowded: `${x2c(c.ratio)} ${us} in the running per ${one}`,
   }[market];
   const standingText = {
-    strong: `${x2c(c.relative)}× a typical competitor's appeal`,
-    typical: `about as appealing as a typical competitor (${x2c(c.relative)}×)`,
-    weak: `${x2c(c.relative)}× a typical competitor's appeal`,
+    strong: `${x2c(c.relative)}× the typical-competitor modeled association weight`,
+    typical: `near the typical-competitor model baseline (${x2c(c.relative)}×)`,
+    weak: `${x2c(c.relative)}× the typical-competitor modeled association weight`,
   }[standing];
 
-  const heights = Array.from({ length: 31 }, (_, i) => 56 + i);
-  const oppositeSex = query.me.sex !== query.seek.sex;
   const x2 = (v: number) => (v >= 10 ? fmt(v) : v.toFixed(2));
 
   return (
     <section aria-label="Competition" className="mt-16 border-t border-rule pt-10">
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">The competition</p>
-      <h2 className="mt-3 font-display text-3xl tracking-tight">{verdict}</h2>
+      <h2 className="mt-3 font-display text-3xl tracking-tight">Observed-pairing competition model</h2>
       <dl className="mt-4 grid max-w-2xl gap-3 text-sm sm:grid-cols-2">
         <div className="rounded-lg border border-rule bg-card p-3">
           <dt className="text-xs uppercase tracking-widest text-muted">
@@ -311,7 +305,7 @@ export default function Competition({
           <dt className="text-xs uppercase tracking-widest text-muted">
             You:{" "}
             <span className={standing === "strong" ? "text-cool" : standing === "weak" ? "text-accent" : "text-ink"}>
-              {standing === "strong" ? "a strong match" : standing === "typical" ? "typical" : "a weaker match"}
+              {standing === "strong" ? "higher modeled association" : standing === "typical" ? "near baseline" : "lower modeled association"}
             </span>
           </dt>
           <dd className="mt-1">{standingText}, based on what they go for.</dd>
@@ -323,10 +317,10 @@ export default function Competition({
       </p>
 
       <div className="mt-8 rounded-xl border border-rule bg-card p-5">
-        <p className="text-xs uppercase tracking-widest text-muted">Your pool, adjusted for competition</p>
+        <p className="text-xs uppercase tracking-widest text-muted">Competition-adjusted index (not a headcount)</p>
         <p className="mt-1 font-display text-6xl tracking-tight">≈{approx(c.adjusted)}</p>
         <p className="mt-1 text-sm text-muted">
-          {them}, or ×{mult.toFixed(2)} your headcount of {fmt(c.targets)}
+          Index units; model multiplier ×{mult.toFixed(2)} applied to the scenario pool
         </p>
         <div className="mt-6 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-start gap-x-2 gap-y-1 text-center sm:gap-x-4">
           <div>
@@ -348,14 +342,11 @@ export default function Competition({
         </div>
         <div className="mt-6 grid gap-3 text-sm text-muted sm:grid-cols-3">
           <p>
-            <strong className="text-ink">In the running:</strong> about {fmt(c.inRunning)} {us} are single, looking and
-            into {them}, counted by how much {them} like yours go for them. A thousand long shots count for less than
-            a hundred strong contenders.
+            <strong className="text-ink">Weighted competition:</strong> {fmt(c.inRunning)} equivalent {us}, after the enabled availability assumptions. Pairing associations determine the weights; this is not an actual count of people pursuing you.
           </p>
           <p>
             <strong className="text-ink">You vs. them:</strong> your appeal to your pool, relative to a typical serious
-            competitor, from what {them} like yours actually go for (below). You out-rank {pct(c.percentile)} of the
-            competition that matters.
+            competitor under observed pairing patterns (below). These associations are not personal judgments or probabilities of dating success.
           </p>
           <p>
             <strong className="text-ink">The benchmark:</strong> with exactly one serious competitor per {one} and you
@@ -365,50 +356,12 @@ export default function Competition({
         </div>
       </div>
 
-      <div className="mt-8">
-        <p className="text-sm font-medium">About you</p>
-        <p className="text-xs text-muted">Leave anything on &ldquo;Typical&rdquo; to use the typical single {noun(query.me.sex, false)} your age
-          {query.me.age === undefined ? " (with no age given at the top, a typical competitor in the running)" : ""}.</p>
-        <div className="mt-3 grid max-w-xl grid-cols-2 gap-3">
-          <YouSelect label="Education" value={you.edu} options={EDU.map((l, v) => ({ v, label: l }))} onChange={(edu) => set({ edu })} />
-          <IncomeSlider value={you.income} onChange={(income) => set({ income })} />
-          <YouSelect label="Kids at home" value={you.kids} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(kids) => set({ kids })} />
-          <YouSelect label="Been married" value={you.prev} options={YESNO.map((l, v) => ({ v, label: l }))} onChange={(prev) => set({ prev })} />
-          <YouSelect
-            label="Politics"
-            value={you.politics}
-            options={PARTIES.map((l, v) => ({ v, label: l }))}
-            onChange={(politics) => set({ politics })}
-          />
-          <YouSelect
-            label="Religion"
-            value={you.religion}
-            options={RELIGIONS.map((l, v) => ({ v, label: l }))}
-            onChange={(religion) => set({ religion })}
-          />
-          <YouSelect
-            label="Race/ethnicity"
-            value={you.race}
-            options={RACES.map((l, v) => ({ v, label: l }))}
-            onChange={(race) => set({ race })}
-          />
-          {oppositeSex && (
-            <YouSelect
-              label="Height"
-              value={you.height}
-              options={heights.map((h) => ({ v: h, label: inches(h) }))}
-              onChange={(height) => set({ height })}
-            />
-          )}
-        </div>
-      </div>
-
-      <h3 className="mt-12 font-display text-2xl tracking-tight">What they go for</h3>
+      <h3 className="mt-12 font-display text-2xl tracking-tight">Observed pairing patterns</h3>
       <p className="mt-2 max-w-xl text-sm text-muted">
         The curves and dots show appeal to {them} like yours as a share of their favorite (100). The tables show
         who ends up with whom: how much more (red) or less (blue) likely than a random pick from the {us} available
-        here, so ×1 is pure chance. Age, education, income, marriage history and race are revealed preferences from
-        couples formed in the last few years relative to who was single at the time; religion and politics come from
+        here, so ×1 is the modeled available-population baseline. Age, education, income, marriage history and race are observed associations from
+        recent marriages relative to a state/year available-population baseline; religion and politics come from
         couples in national surveys; kids and height from published studies.
       </p>
       <div className="mt-6 grid gap-8 sm:grid-cols-2">
@@ -466,10 +419,9 @@ export default function Competition({
         <summary className="cursor-pointer select-none hover:text-ink">How the competition model works</summary>
         <div className="mt-3 space-y-3">
           <p>
-            For every couple formed in the last one to three years in the ACS microdata, the partner someone actually
-            ended up with is compared against 15 random single people of the right sex from the same state, drawn in
+            For recent marriages in the ACS microdata, the observed partner is compared against 15 random unpartnered adults of the same sex from the same state and survey year, drawn in
             proportion to how common they are and how likely they are to be into the chooser&apos;s sex. A conditional
-            logit on those choices (sampling alternatives is consistent per{" "}
+            logit contrast against that baseline (inspired by{" "}
             <a className="underline" href={SOURCES.mcfadden.url} target="_blank" rel="noreferrer">McFadden 1978</a>)
             estimates how much age gap, education pairing, income and marriage history shift who ends up with whom,
             net of who was available. This is the choice-model cousin of the matching models in{" "}
@@ -489,9 +441,7 @@ export default function Competition({
             <a className="underline" href={SOURCES.nhanes.url} target="_blank" rel="noreferrer">NHANES</a>.
           </p>
           <p>
-            Caveats: income is measured after the couple formed (married men tend to earn more afterward, so income
-            effects may be overstated); same-sex estimates rest on smaller samples; and none of this sees looks,
-            humor, politics or whether you text back.
+            Caveats: these are associations, not identified preferences. Income is measured after marriage; unmeasured networks, segregation and selection affect pairing. Validation compares 2024 households with fits on 2020–2023 recent marriages; it does not validate dating outcomes. Unknown-duration cohabitation is excluded. Unsupported same-sex religious pairing is omitted. Full diagnostics are in /data/choice.json.
           </p>
         </div>
       </details>
