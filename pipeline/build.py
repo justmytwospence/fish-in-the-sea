@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 import terrain
+from geography import attach_pumas, check_allocations
 
 ROOT = Path(__file__).parent
 RAW = ROOT / "raw"
@@ -182,11 +183,7 @@ tracts = geos[geos.SUMLEVEL == "140"][["GEO_ID", "pop"]].copy()
 tracts["st"] = tracts.GEO_ID.str[9:11]
 tracts["county"] = tracts.GEO_ID.str[9:14]
 tracts["tract"] = tracts.GEO_ID.str[14:20]
-# Connecticut's county equivalents changed after 2020 but tract codes did not,
-# so join on state + tract.
-tp["st"] = tp.STATEFP
-tp["tract"] = tp.TRACTCE
-tracts = tracts.merge(tp[["st", "tract", "PUMA5CE"]], on=["st", "tract"], how="inner")
+tracts = attach_pumas(tracts, tp)
 tracts["puma"] = tracts.st.astype(int) * 100000 + tracts.PUMA5CE.astype(int)
 puma_county = tracts.groupby(["puma", "county"], as_index=False)["pop"].sum()
 puma_tot = puma_county.groupby("puma")["pop"].transform("sum")
@@ -199,6 +196,7 @@ for m in markets:
     for puma, frac in f.items():
         rows.append((m["id"], int(puma), float(frac)))
 pw = pd.DataFrame(rows, columns=["market", "stpuma", "f"])
+check_allocations(pw)
 con.register("pw", pw)
 
 # ------------------------------------------------------------- PUMS persons
@@ -234,8 +232,19 @@ select p.*, st*100000 + puma as stpuma,
   case {' '.join(f"when age between {lo} and {hi} then {i}" for i, (lo, hi) in enumerate(BINS))}
        else -1 end as bin
 from '{PQ}' p join hh using (SERIALNO)
-where age >= 18
+where age >= 18 and st <> 72
 """)
+unmatched = con.execute('select distinct p.stpuma from p anti join pw on p.stpuma=pw.stpuma').fetchall()
+if unmatched: raise ValueError(f'PUMS PUMAs without allocations: {unmatched}')
+invalid = con.execute('select count(*) from p where sex not in (1,2) or w <= 0 or mar not between 1 and 5 or schl not between 1 and 24 or rac1p not between 1 and 9 or hisp not between 1 and 24').fetchone()[0]
+if invalid: raise ValueError(f'Invalid PUMS codes/weights: {invalid}')
+report = {'schemaVersion':2,'acsGeographyYear':2024,'pumaYear':2020,'tractKey':'state+county+tract',
+          'connecticut':'Unique populated tract identity across the 2020/2022 county transition; zero-population water tracts excluded',
+          'positiveTractPopulation':float(tracts['pop'].sum()),'allocatedPopulation':float(puma_county['pop'].sum()),
+          'markets':len(markets),'pumas':int(pw.stpuma.nunique()),'unmatchedPumas':unmatched,
+          'maxAllocationSumError':float((pw.groupby('stpuma').f.sum()-1).abs().max()),
+          'pumsRows':int(con.execute('select count(*) from p').fetchone()[0]),'invalidPumsCodes':invalid}
+(OUT/'geography-report.json').write_text(json.dumps(report,allow_nan=False))
 div_of_state = {int(k): int(v) for k, v in state_div.items()}
 con.execute("create or replace table stdiv (st int, division int)")
 con.executemany("insert into stdiv values (?, ?)", list(div_of_state.items()))
@@ -346,6 +355,8 @@ for (os_, ps), g in both.groupby(["osex", "psex"]):
             elif shift < 0:
                 row[shift:] = 0
             acc += row * (1 - abs(shift) / (bw + 1))
+        if acc.sum() <= 0:
+            raise ValueError(f"No partner-age support for {os_}->{ps}, age {own}")
         c = np.cumsum(acc) / acc.sum()
         rowsout.append([round(float(x), 4) for x in c])
     cdfs[f"{os_}{ps}"] = rowsout
@@ -412,8 +423,7 @@ index = []
 for m in markets:
     geo = m["geo_id"]
     if geo not in b12.index:
-        print("  missing", m["name"])
-        continue
+        raise ValueError(f"Missing ACS market: {m['name']}")
     d = int(m["division"])
     pe = pep_by.get(m.get("cbsa"))
     cty = cc.loc[m["county"]] if m.get("county") in cc.index else None
@@ -450,7 +460,7 @@ for m in markets:
             for i in range(len(BINS)):
                 parent = shrink(divd.get((d, sex, i, mi)), nat[(sex, i, mi)], k=5)
                 p, n = shrink(mktd.get((m["id"], sex, i, mi)), parent)
-                A.append([round(float(x), 4) for x in p])
+                A.append([float(x) for x in p])
                 N.append(round(n))
             shard["attrs"][s][mg] = A
             shard["neff"][s][mg] = N
@@ -459,7 +469,7 @@ for m in markets:
                 nat_ri = nat_r.get((sex, i, mi), (np.full(NRACE, 1 / NRACE), 0))
                 parent = shrink(div_r.get((d, sex, i, mi)), nat_ri, k=5)
                 pr, _ = shrink(mkt_r.get((m["id"], sex, i, mi)), parent)
-                R.append([round(float(x), 4) for x in pr])
+                R.append([float(x) for x in pr])
             shard["race"][s][mg] = R
     (OUT / "m" / f"{m['id']}.json").write_text(json.dumps(shard, separators=(",", ":")))
     entry = dict(id=m["id"], name=m["name"], kind=m["kind"], pop=shard["pop"], tags=m["tags"])

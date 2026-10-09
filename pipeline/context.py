@@ -12,9 +12,11 @@ Outputs web/public/data/context.json with:
 
 import json
 import math
+import hashlib
 from pathlib import Path
 from urllib.parse import quote
 from urllib.request import urlopen
+from survey_codes import nhanes_smoking, nhanes_degree
 
 import numpy as np
 import pandas as pd
@@ -77,8 +79,7 @@ print("heights", heights)
 # Unpartnered adults: DMDMARTZ 2 = widowed/divorced/separated, 3 = never married.
 un = nh[nh.DMDMARTZ.isin([2, 3])].copy()
 un["band"] = un.RIDAGEYR.apply(lambda a: band_of(a, BANDS))
-un["smoker"] = ((un.SMQ020 == 1) & un.SMQ040.isin([1, 2])).astype(float)
-un.loc[un.SMQ020.isna(), "smoker"] = np.nan
+un['smoker'] = nhanes_smoking(un)
 un["obese"] = (un.BMXBMI >= 30).astype(float)
 un["over"] = (un.BMXBMI >= 25).astype(float)
 un.loc[un.BMXBMI.isna(), ["obese", "over"]] = np.nan
@@ -117,10 +118,10 @@ print("health", {k: v for k, v in health.items() if k != "bmiAbove"})
 RACE_OF = {1: 2, 2: 2, 3: 0, 4: 1, 6: 3, 7: 4}
 ad = nh.copy()
 ad["race"] = ad.RIDRETH3.map(RACE_OF)
-ad["ba"] = np.where(ad.DMDEDUC2.isna(), np.nan, (ad.DMDEDUC2 == 5).astype(float))
+ad['ba'] = nhanes_degree(ad)
 ad["unp"] = np.where(ad.DMDMARTZ.isin([1, 2, 3]), ad.DMDMARTZ.isin([2, 3]).astype(float), np.nan)
 ad["band"] = ad.RIDAGEYR.apply(lambda a: band_of(a, BANDS))
-ad = ad[ad.race.notna() & ad.ba.notna() & ad.unp.notna() & (ad.band >= 0)]
+ad = ad[ad.race.notna() & ad.ba.notna() & ad.unp.notna() & (ad.band >= 0)].copy()
 
 
 def design(sex, band, ba, race, unp):
@@ -163,7 +164,7 @@ def predict(beta, sex, band, ba, race, unp):
     return 1 / (1 + np.exp(-(design(sex, band, ba, race, unp) @ beta)))
 
 
-ad["smoke"] = np.where(ad.SMQ020.isna(), np.nan, ((ad.SMQ020 == 1) & ad.SMQ040.isin([1, 2])).astype(float))
+ad['smoke'] = nhanes_smoking(ad)
 models = {"smoke": fitted("smoke")}
 for t in BMI_CUTS:
     ad[f"bmi{t}"] = np.where(ad.BMXBMI.isna(), np.nan, (ad.BMXBMI >= t).astype(float))
@@ -222,8 +223,11 @@ SOCRATA = "https://data.cdc.gov/resource/{}.json?$limit=50000&$where={}"
 
 
 def socrata(ds, where):
-    with urlopen(SOCRATA.format(ds, quote(where))) as r:
-        return pd.DataFrame(json.load(r))
+    cache = RAW / f'brfss-{ds}-{hashlib.sha256(where.encode()).hexdigest()[:12]}.json'
+    if not cache.exists():
+        with urlopen(SOCRATA.format(ds, quote(where)), timeout=60) as r:
+            cache.write_text(json.dumps(json.load(r)))
+    return pd.DataFrame(json.loads(cache.read_text()))
 
 
 TOPICS = "(topic='Current Smoker Status' or topic='BMI Categories')"
@@ -241,7 +245,7 @@ def rates(df, loc):
         over = v.get("Overweight (BMI 25.0-29.9)")
         if any(x is None or not math.isfinite(x) for x in (smoke, obese, over)):
             continue  # suppressed in this area; fall back to the state
-        out[code] = dict(smoke=smoke, obese=obese, over=obese + over, n=n)
+        out[code] = dict(smoke=smoke, obese=obese, over=obese + over, n=n, year=int(g.year.iloc[0]))
     return out
 
 
@@ -272,6 +276,7 @@ metro_cbsa = {}
 for cb, rs in by_cbsa.items():
     n = sum(r["n"] for r in rs)
     metro_cbsa[cb] = {k: sum(r[k] * r["n"] for r in rs) / n for k in ("smoke", "obese", "over")}
+    metro_cbsa[cb]['year'] = 2024
 
 logit = lambda p: math.log(p / (1 - p))  # noqa: E731
 
@@ -322,7 +327,7 @@ for m in idx["markets"]:
     pm = pred_by_market.get(m["id"], us_pred)
     net = lambda key, pk: logit(loc[key]) - logit(us[key]) - (logit(pm[pk]) - logit(us_pred[pk]))  # noqa: E731
     rec = {
-        "src": src,
+        "src": src, 'sourceYear': loc['year'],
         "smoke": round(net("smoke", "smoke"), 3),
         "obese": round(net("obese", "bmi30"), 3),
         "over": round(net("over", "bmi25"), 3),

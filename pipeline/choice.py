@@ -1,4 +1,8 @@
-"""Estimate revealed partner preferences from recently formed couples.
+"""Estimate observed-pairing associations from recent marriages.
+
+Cohabitation duration is unknown and excluded from the primary sample.
+The contrast is relative to a state/year weighted available-population
+baseline, not an identified one-sided preference or dating-outcome model.
 
 For each direction (chooser sex -> partner sex) we fit a conditional logit in
 which the chooser's actual partner is compared with K alternatives drawn at
@@ -16,15 +20,20 @@ Output: web/public/data/choice.json
 """
 
 import json
+import argparse
 from pathlib import Path
 
 import duckdb
 import numpy as np
-from scipy.optimize import minimize
+from choice_math import fit_contrast, loss
 
 ROOT = Path(__file__).parent
 PQ = ROOT / "raw" / "pums.parquet"
 OUT = ROOT.parent / "web" / "public" / "data" / "choice.json"
+parser = argparse.ArgumentParser()
+parser.add_argument('--include-cohab', action='store_true', help='Separate sensitivity fit; unknown union duration, never the primary artifact')
+args = parser.parse_args()
+if args.include_cohab: OUT = OUT.with_name('choice-cohab-sensitivity.json')
 K = 15  # sampled alternatives per observed choice
 MAX_GROUPS = 80_000
 RIDGE = 1.0
@@ -105,20 +114,22 @@ select p.*, cast(substr(SERIALNO,1,4) as int) yr,
     when rel in (25,26,27) and hh.has_grandkid = 1 then 1
     else 0 end as kids_now
 from '{PQ}' p join hh using (SERIALNO)
-where age >= 18
+where age >= 18 and st <> 72
 """)
 
 # Pool of alternatives: unpartnered, non-institutional adults.
 singles = con.execute("""
-  select st, sex, age, edu, inc, race, kids_now kids,
+  select yr, st, sex, age, edu, inc, race, kids_now kids,
          case when mar in (2,3,4) then 1 else 0 end prev, w
   from p where mar <> 1 and cohab = 0 and rel <> 37 and age <= 85
+  order by SERIALNO, sporder
 """).df()
 
 # Recently formed couples. Married: within 3 years of the survey (age and
 # prior-marriage status rolled back to the wedding year). Cohabiting: assumed
 # about a year in. Children count as pre-existing only if older than the union.
-couples = con.execute("""
+cohab_clause = 'or s.rel in (22,24)' if args.include_cohab else ''
+couples = con.execute(f"""
 with c as (
   select SERIALNO, rel, age, sex, edu, inc, race, w, st, mar, marht, marhyp, yr,
          case when rel in (21,23) then yr - marhyp else 1 end dur
@@ -133,22 +144,23 @@ k as (
   from p group by 1
 )
 select
-  h.st, h.w,
-  h.sex hs, h.age - s.dur ha, h.edu he, h.inc hi, h.race hr,
+  h.SERIALNO household, h.yr, h.st, h.w hw, s.w sw,
+  h.sex hs, h.age ha, h.edu he, h.inc hi, h.race hr,
   case when s.rel in (21,23) then (h.marht > 1)::int else (h.mar in (2,3,4))::int end hp,
   case when k.oldest_own > s.dur + 1 and k.oldest_own < 18 + s.dur then 1 else 0 end hk,
-  s.sex ss, s.age - s.dur sa, s.edu se, s.inc si, s.race sr,
+  s.sex ss, s.age sa, s.edu se, s.inc si, s.race sr,
   case when s.rel in (21,23) then (s.marht > 1)::int else (s.mar in (2,3,4))::int end sp,
   case when k.oldest_step < 18 + s.dur then 1 else 0 end sk
 from h join s using (SERIALNO) left join k using (SERIALNO)
-where (s.rel in (22,24) or (s.marhyp >= s.yr - 3 and s.marhyp > 0))
-  and h.age - s.dur >= 18 and s.age - s.dur >= 18
+where ((s.rel in (21,23) and s.marhyp between s.yr - 3 and s.yr) {cohab_clause})
+  and h.age between 18 and 85 and s.age between 18 and 85
+order by h.SERIALNO, s.sex, s.age
 """).df()
 print("couples", len(couples))
 
 by_state = {}
-for (st, sex), g in singles.groupby(["st", "sex"]):
-    by_state[(st, sex)] = g
+for (yr, st, sex), g in singles.groupby(["yr", "st", "sex"]):
+    by_state[(yr, st, sex)] = g
 
 
 def side(df, pre):
@@ -164,25 +176,28 @@ def build(cs, ps):
         # Opposite-sex couples match one orientation; same-sex couples match
         # both, so each partner counts once as a chooser.
         sub = couples[(couples[a + "s"] == cs) & (couples[b + "s"] == ps)]
-        rows.append((side(sub, a), side(sub, b), sub.st.values, sub.w.values))
+        rows.append((side(sub, a), side(sub, b), sub.st.values, sub[a+'w'].values, sub.yr.values, sub.household.values))
     x = {k: np.concatenate([r[0][k] for r in rows]) for k in rows[0][0]}
     y = {k: np.concatenate([r[1][k] for r in rows]) for k in rows[0][1]}
     st = np.concatenate([r[2] for r in rows])
     w = np.concatenate([r[3] for r in rows]).astype(np.float64)
+    yr = np.concatenate([r[4] for r in rows])
+    household = np.concatenate([r[5] for r in rows])
     if len(st) > MAX_GROUPS:
         idx = RNG.choice(len(st), MAX_GROUPS, replace=False)
         x = {k: v[idx] for k, v in x.items()}
         y = {k: v[idx] for k, v in y.items()}
-        st, w = st[idx], w[idx]
-    return x, y, st, w
+        st, w, yr, household = st[idx], w[idx], yr[idx], household[idx]
+    return x, y, st, w, yr, household
 
 
-def sample_alternatives(x, st, ps, cs):
+def sample_alternatives(x, st, ps, cs, yr):
     n = len(st)
     alt = {k: np.zeros((n, K), np.int32) for k in ("age", "edu", "inc", "kids", "prev", "race")}
-    for s in np.unique(st):
-        pool = by_state.get((s, ps))
-        mask = st == s
+    for year, s in sorted(set(zip(yr, st))):
+        pool = by_state.get((year, s, ps))
+        if pool is None or not len(pool): raise ValueError(f'No alternatives in {year}, {s}, sex {ps}')
+        mask = (st == s) & (yr == year)
         prob = pool.w.values * attraction(ps, cs, pool.age.values)
         prob = prob / prob.sum()
         draw = RNG.choice(len(pool), (mask.sum(), K), p=prob)
@@ -192,28 +207,55 @@ def sample_alternatives(x, st, ps, cs):
 
 
 def fit(cs, ps):
-    x, y, st, w = build(cs, ps)
-    alt = sample_alternatives(x, st, ps, cs)
+    x, y, st, w, yr, household = build(cs, ps)
+    alt = sample_alternatives(x, st, ps, cs, yr)
     G = len(st)
     cand = {k: np.concatenate([y[k][:, None], alt[k]], 1) for k in alt}  # chosen at column 0
     xb = {k: np.repeat(x[k][:, None], K + 1, 1) for k in alt}
     X = features(xb, cand)  # (G, K+1, F)
     F = X.shape[-1]
-    w = w / w.mean()
-
-    def nll(beta):
-        u = X @ beta
-        u -= u.max(1, keepdims=True)
-        e = np.exp(u)
-        p = e / e.sum(1, keepdims=True)
-        ll = (w * (u[:, 0] - np.log(e.sum(1)))).sum()
-        grad = (w[:, None] * (X[:, 0, :] - np.einsum("gk,gkf->gf", p, X))).sum(0)
-        return -ll / G + RIDGE * beta @ beta / G, -grad / G + 2 * RIDGE * beta / G
-
-    res = minimize(nll, np.zeros(F), jac=True, method="L-BFGS-B", options={"maxiter": 500})
-    beta = res.x
-    print(f"  {cs}->{ps}: groups={G} nll={res.fun:.4f} (chance {np.log(K + 1):.4f}) converged={res.success}")
-    out = {"n": int(G), "age": beta[:N_AGE].round(5).tolist()}
+    train, test = yr < 2024, yr == 2024
+    if train.sum() < 100 or test.sum() < 50:
+        return {'n': int(G), 'validation': {'status':'unsupported', 'reason':'Insufficient household holdout support'}}
+    beta = fit_contrast(X[train], w[train], RIDGE)
+    age_beta = fit_contrast(X[train, :, :N_AGE], w[train], RIDGE)
+    full_loss = loss(beta, X[test], w[test])
+    age_loss = loss(age_beta, X[test, :, :N_AGE], w[test])
+    delta = age_loss - full_loss
+    # Bootstrap households, not rows (same-sex pairs have two chooser rows).
+    ids = household[test]
+    unique = np.unique(ids)
+    stats = np.array([[np.sum(w[test][ids == h] * delta[ids == h]), np.sum(w[test][ids == h])] for h in unique])
+    draws = RNG.integers(0, len(unique), (200, len(unique)))
+    sums = stats[draws].sum(1)
+    ci = np.quantile(sums[:,0] / sums[:,1], [.025,.975])
+    validation = {'status':'validated' if ci[0] > 0 else 'unsupported', 'trainRows':int(train.sum()),
+                  'testRows':int(test.sum()), 'testHouseholds':int(len(unique)),
+                  'fullLogLoss':float(np.average(full_loss, weights=w[test])),
+                  'ageLogLoss':float(np.average(age_loss, weights=w[test])),
+                  'availabilityLogLoss':float(np.log(K+1)), 'improvement95':ci.tolist(),
+                  'scope':'Observed marriages/cohabitation with unknown duration (sensitivity only); not dating outcomes' if args.include_cohab else 'Observed recent marriages; not dating outcomes',
+                  'ageSupport':[18,85], 'converged':True}
+    if validation['fullLogLoss'] >= validation['availabilityLogLoss']:
+        validation['status'] = 'unsupported'
+    validation['ageBands'] = []
+    for lo,hi in ((18,24),(25,34),(35,44),(45,54),(55,64),(65,85)):
+        mask = (x['age'][test]>=lo) & (x['age'][test]<=hi)
+        validation['ageBands'].append({'lo':lo,'hi':hi,'n':int(mask.sum()),'households':int(len(np.unique(ids[mask]))),'supported':bool(len(np.unique(ids[mask]))>=50),
+          'logLoss':float(np.average(full_loss[mask],weights=w[test][mask])) if mask.any() else None})
+    validation['sensitivityLogLoss'] = {}
+    start = N_AGE
+    for name,n in DIMS:
+        removed = beta.copy(); removed[start:start+n*(n-1)] = 0; start += n*(n-1)
+        validation['sensitivityLogLoss'][f'without_{name}'] = float(np.average(loss(removed,X[test],w[test]),weights=w[test]))
+    # Observed partner age and conditional contrast-weighted age, for
+    # descriptive calibration on the held-out sampled sets (not dating outcomes).
+    utility = X[test] @ beta; utility -= utility.max(1,keepdims=True)
+    probabilities = np.exp(utility); probabilities /= probabilities.sum(1,keepdims=True)
+    validation['partnerAgeCheck'] = {'observed':float(np.average(y['age'][test],weights=w[test])),
+      'contrastPredicted':float(np.average((probabilities*cand['age'][test]).sum(1),weights=w[test]))}
+    print(f'  {cs}->{ps}: {validation}')
+    out = {"n": int(G), "validation":validation, "age": beta[:N_AGE].round(5).tolist()}
     i = N_AGE
     for name, n in DIMS:
         tab = [[0.0] * n for _ in range(n)]
@@ -225,9 +267,10 @@ def fit(cs, ps):
     return out
 
 
-result = {"dKnots": D_KNOTS, "ageKnots": AGE_KNOTS, "dirs": {}}
+result = {"schemaVersion":2, "dKnots": D_KNOTS, "ageKnots": AGE_KNOTS, "dirs": {},
+          'sample':'Recent marriages plus unknown-duration cohabitation (sensitivity only)' if args.include_cohab else 'Recent marriages only; unknown-duration cohabitation excluded', 'seed':20240928}
 for cs, ps in ((2, 1), (1, 2), (1, 1), (2, 2)):
     result["dirs"][f"{cs}{ps}"] = fit(cs, ps)
 OUT.write_text(json.dumps(result, separators=(",", ":")))
 for k, d in result["dirs"].items():
-    print(k, "edu", d["edu"], "inc", d["inc"], "prev", d["prev"])
+    print(k, 'validation', d['validation'])
