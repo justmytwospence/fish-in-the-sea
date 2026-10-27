@@ -93,3 +93,9 @@ CI performs these checks using committed artifacts; raw survey data is local-onl
 ```sh
 cd web && npm ci && npm run dev
 ```
+
+## License
+
+[Functional Source License, Version 1.1, ALv2 Future License](LICENSE.md) (FSL-1.1-ALv2). You may use, modify and self-host it for any purpose except offering a competing commercial product or service; each release becomes available under Apache-2.0 two years after it ships.
+
+Outside contributions require agreeing to a contributor license agreement; open an issue before sending a pull request.
