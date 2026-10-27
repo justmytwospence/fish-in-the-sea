@@ -13,3 +13,8 @@ dependencies = [
     "scikit-learn>=1.9.1",
     "scipy>=1.18.1",
 ]
+
+[tool.uv]
+# Release cooldown: resolve only releases at least a week old. uv.lock records it, and
+# `uv sync --locked` in CI fails when the lockfile was resolved under other settings.
+exclude-newer = "7 days"
